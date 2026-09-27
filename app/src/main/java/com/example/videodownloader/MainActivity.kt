@@ -36,7 +36,6 @@ class MainActivity : ComponentActivity() {
 
     private val TAG = "MainActivity"
 
-    /** Ссылка, пришедшая через «Поделиться». Обновляется через onNewIntent. */
     private val sharedLinkState = mutableStateOf("")
 
     private val folderPicker = registerForActivityResult(
@@ -84,7 +83,6 @@ class MainActivity : ComponentActivity() {
             requestMediaPermissions()
         }
 
-        // Обрабатываем intent, с которым нас запустили
         handleShareIntent(intent)
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -125,7 +123,6 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // Читаем state — Compose перерисует, когда придёт новая ссылка
                 val sharedLink = sharedLinkState.value
 
                 VideoDownloaderRoot(sharedLink, { folderPicker.launch(null) })
@@ -133,17 +130,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Вызывается, когда Activity уже существует, а приходит новый intent (singleTask).
-     * Здесь обрабатываем повторное «Поделиться» из TikTok/браузера.
-     */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShareIntent(intent)
     }
 
-    /** Парсит ACTION_SEND intent и кладёт ссылку в state. */
     private fun handleShareIntent(intent: Intent?) {
         if (intent == null) return
         if (intent.action == Intent.ACTION_SEND) {
@@ -222,6 +214,8 @@ private fun VideoDownloaderRoot(
     ) { pad ->
         HorizontalPager(
             state = pagerState,
+            // ⚠️ Держим все 3 страницы в памяти — не пересобираем при каждом свайпе
+            beyondViewportPageCount = 2,
             modifier = Modifier.padding(pad).fillMaxSize()
         ) { page ->
             when (page) {
