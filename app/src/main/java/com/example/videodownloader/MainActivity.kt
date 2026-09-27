@@ -36,6 +36,9 @@ class MainActivity : ComponentActivity() {
 
     private val TAG = "MainActivity"
 
+    /** Ссылка, пришедшая через «Поделиться». Обновляется через onNewIntent. */
+    private val sharedLinkState = mutableStateOf("")
+
     private val folderPicker = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -81,6 +84,9 @@ class MainActivity : ComponentActivity() {
             requestMediaPermissions()
         }
 
+        // Обрабатываем intent, с которым нас запустили
+        handleShareIntent(intent)
+
         CoroutineScope(Dispatchers.IO).launch {
             val update = UpdateChecker.checkForUpdate()
             if (update != null) {
@@ -89,10 +95,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-
-        val shared = if (intent?.action == Intent.ACTION_SEND) {
-            intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
-        } else ""
 
         setContent {
             VideoDownloaderTheme {
@@ -123,7 +125,32 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                VideoDownloaderRoot(shared, { folderPicker.launch(null) })
+                // Читаем state — Compose перерисует, когда придёт новая ссылка
+                val sharedLink = sharedLinkState.value
+
+                VideoDownloaderRoot(sharedLink, { folderPicker.launch(null) })
+            }
+        }
+    }
+
+    /**
+     * Вызывается, когда Activity уже существует, а приходит новый intent (singleTask).
+     * Здесь обрабатываем повторное «Поделиться» из TikTok/браузера.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    /** Парсит ACTION_SEND intent и кладёт ссылку в state. */
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.action == Intent.ACTION_SEND) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty().trim()
+            if (text.isNotBlank()) {
+                sharedLinkState.value = text
+                Log.d(TAG, "Share intent: $text")
             }
         }
     }
@@ -133,6 +160,7 @@ class MainActivity : ComponentActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.READ_MEDIA_VIDEO)
                 add(Manifest.permission.READ_MEDIA_IMAGES)
+                add(Manifest.permission.READ_MEDIA_AUDIO)
                 if (Build.VERSION.SDK_INT >= 34) {
                     add("android.permission.READ_MEDIA_VISUAL_USER_SELECTED")
                 }
