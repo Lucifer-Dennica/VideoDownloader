@@ -10,6 +10,9 @@ data class DownloadEntity(
     val title: String,
     val thumbnailUrl: String? = null,
     val filePath: String? = null,
+    val folderPath: String? = null,     // Для фото-карусели — путь к папке
+    val type: String = "VIDEO",          // VIDEO / PHOTOS
+    val itemCount: Int = 1,              // Сколько фото в карусели
     val status: String = "QUEUED",
     val progress: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
