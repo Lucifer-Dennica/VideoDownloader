@@ -13,6 +13,7 @@ import com.example.videodownloader.data.repository.DownloadRepository
 import com.example.videodownloader.data.settings.SettingsRepository
 import com.example.videodownloader.download.DownloadWorker
 import com.example.videodownloader.util.UrlParser
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -24,7 +25,8 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = SettingsRepository(app)
 
     init {
-        viewModelScope.launch {
+        // ⚠️ Скан MediaStore — только на IO, иначе блокирует UI
+        viewModelScope.launch(Dispatchers.IO) {
             repo.scanFolder()
         }
     }
@@ -45,10 +47,6 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         .map { list -> list.filter { it.status == "COMPLETED" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /**
-     * Ставит загрузку в очередь.
-     * @param audio true — скачать только аудио (mp3), false — видео с качеством из настроек.
-     */
     fun enqueue(raw: String, audio: Boolean = false) {
         val parsed = UrlParser.parse(raw) ?: return
         viewModelScope.launch {
@@ -77,7 +75,6 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Удаляет запись вместе с файлом. */
     fun delete(item: DownloadEntity) = viewModelScope.launch {
         try {
             WorkManager.getInstance(getApplication())
@@ -86,7 +83,6 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         repo.deleteWithFile(item)
     }
 
-    /** Массовое удаление (мультивыбор). */
     fun deleteMany(items: List<DownloadEntity>) = viewModelScope.launch {
         items.forEach { item ->
             try {
@@ -97,7 +93,7 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun rescanFolder() = viewModelScope.launch {
+    fun rescanFolder() = viewModelScope.launch(Dispatchers.IO) {
         repo.scanFolder()
     }
 }
