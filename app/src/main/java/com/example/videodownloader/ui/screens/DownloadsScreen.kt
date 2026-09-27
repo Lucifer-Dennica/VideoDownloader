@@ -2,7 +2,7 @@ package com.example.videodownloader.ui.screens
 
 import android.content.Intent
 import android.net.Uri
-import android.os.Environment
+import android.os.storage.StorageManager
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -98,47 +98,41 @@ private fun openItem(context: android.content.Context, item: DownloadEntity) {
     }
 }
 
+/**
+ * Открывает папку через StorageManager — единственный способ, работающий на Android 5+.
+ */
 private fun openFolder(context: android.content.Context, item: DownloadEntity) {
     val service = detectService(item)
     val path = if (item.type == "PHOTOS" && !item.folderPath.isNullOrBlank()) {
-        item.folderPath
+        // folderPath = "DCIM/VideoDownloader/TikTok/Photos/album_xxx/"
+        item.folderPath.trimEnd('/')
     } else {
         "DCIM/VideoDownloader/$service"
     }
 
-    // Способ 1: file://
     try {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(
-                Uri.parse("file://${Environment.getExternalStorageDirectory()}/$path"),
-                "resource/folder"
-            )
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-        return
-    } catch (_: Exception) { }
+        val storageManager = context.getSystemService(android.content.Context.STORAGE_SERVICE) as StorageManager
+        val volume = storageManager.primaryStorageVolume
+        val intent = volume.createOpenDocumentTreeIntent()
 
-    // Способ 2: через ExternalStorageProvider
-    try {
-        val encodedPath = Uri.encode(path)
-        val folderUri = Uri.parse(
-            "content://com.android.externalstorage.documents/document/primary%3A$encodedPath"
+        // Initial URI в формате: content://com.android.externalstorage.documents/root/primary%3APATH
+        val encodedPath = "primary%3A" + Uri.encode(path)
+        val initialUri = Uri.parse(
+            "content://com.android.externalstorage.documents/root/$encodedPath"
         )
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(folderUri, "vnd.android.document/directory")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
+        intent.putExtra("android.provider.extra.INITIAL_URI", initialUri)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
         context.startActivity(intent)
         return
-    } catch (_: Exception) { }
+    } catch (e: Exception) {
+        // Игнорируем и пробуем fallback
+    }
 
     Toast.makeText(context, "Путь: $path", Toast.LENGTH_LONG).show()
 }
 
 private fun detectService(item: DownloadEntity): String {
-    // Если url начинается с "local://" — сервис уже внутри
     if (item.url.startsWith("local://")) {
         return item.url.removePrefix("local://")
     }
