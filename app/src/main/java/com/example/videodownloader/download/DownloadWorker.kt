@@ -82,7 +82,7 @@ class DownloadWorker(
 
                 val fileName = "${if (audioOnly) "audio" else "video"}_${id}_${System.currentTimeMillis()}.$extension"
                 val savedPath = if (audioOnly) {
-                    saveAudioToPublicDcim(tempFile, fileName, service)
+                    saveAudioToPublicMusic(tempFile, fileName, service)
                 } else {
                     saveToPublicDcim(tempFile, fileName, service)
                 }
@@ -91,7 +91,7 @@ class DownloadWorker(
                 repository.getById(id)?.let {
                     repository.update(it.copy(
                         filePath = savedPath,
-                        folderPath = if (audioOnly) "DCIM/VideoDownloader/$service/Audio" else it.folderPath,
+                        folderPath = if (audioOnly) "Music/VideoDownloader/$service/Audio" else it.folderPath,
                         type = if (audioOnly) "AUDIO" else "VIDEO",
                         itemCount = 1,
                         status = "COMPLETED",
@@ -324,10 +324,6 @@ class DownloadWorker(
         return Resolved(videoUrl = video, thumbnail = thumb)
     }
 
-    /**
-     * Cobalt — новый API (downloadMode) с fallback на старый (isAudioOnly).
-     * Если все инстансы отдали invalid_body — кидаем ошибку.
-     */
     private fun resolveCobalt(
         url: String,
         quality: VideoQuality,
@@ -342,12 +338,9 @@ class DownloadWorker(
             COBALT_URL
         )
 
-        // Два возможных формата запроса
         val bodies = if (audioOnly) {
             listOf(
-                // Новый Cobalt API (v10+)
                 """{"url":"$url","downloadMode":"audio","audioFormat":"mp3"}""",
-                // Старый Cobalt API (v7-v9)
                 """{"url":"$url","isAudioOnly":true,"aFormat":"mp3"}"""
             )
         } else {
@@ -426,7 +419,6 @@ class DownloadWorker(
             } else {
                 conn.errorStream?.bufferedReader()?.readText().orEmpty()
             }
-            // Cobalt отдаёт JSON и при 400 — не кидаем исключение, парсим тело
             text.ifBlank { throw Exception("HTTP $code") }
         } finally { conn.disconnect() }
     }
@@ -505,8 +497,12 @@ class DownloadWorker(
         }
     }
 
-    private fun saveAudioToPublicDcim(tempFile: File, fileName: String, service: String): String {
-        val relativePath = Environment.DIRECTORY_DCIM + "/VideoDownloader/" + service + "/Audio/"
+    /**
+     * Сохраняет аудио в Music/VideoDownloader/{service}/Audio/ как .mp3.
+     * Android разрешает для аудио только Music/Alarms/Ringtones/... — DCIM нельзя.
+     */
+    private fun saveAudioToPublicMusic(tempFile: File, fileName: String, service: String): String {
+        val relativePath = Environment.DIRECTORY_MUSIC + "/VideoDownloader/" + service + "/Audio/"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
@@ -528,7 +524,7 @@ class DownloadWorker(
             return uri.toString()
         } else {
             val dir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
                 "VideoDownloader/$service/Audio"
             ).apply { mkdirs() }
             val target = File(dir, fileName)
