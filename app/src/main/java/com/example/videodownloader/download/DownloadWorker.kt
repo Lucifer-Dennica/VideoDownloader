@@ -4,7 +4,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ContentValues
 import android.content.Context
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -14,6 +13,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.videodownloader.data.repository.DownloadRepository
+import com.example.videodownloader.data.settings.VideoQuality
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -28,9 +28,11 @@ class DownloadWorker(
     override suspend fun doWork(): Result {
         val url = inputData.getString(KEY_URL) ?: return Result.failure()
         val id = inputData.getLong(KEY_ID, 0L)
+        val quality = VideoQuality.fromName(inputData.getString(KEY_QUALITY))
+        val audioOnly = inputData.getBoolean(KEY_AUDIO, false)
         val service = getServiceFolder(url)
 
-        Log.d(TAG, "=== Начало: url=$url id=$id service=$service ===")
+        Log.d(TAG, "=== Начало: url=$url id=$id service=$service quality=$quality audioOnly=$audioOnly ===")
 
         val repository = DownloadRepository(applicationContext)
         val current = repository.getById(id)
@@ -38,11 +40,15 @@ class DownloadWorker(
             repository.update(current.copy(status = "DOWNLOADING", progress = 0))
         }
 
-        showNotification(id, "Скачивание…", 0, ongoing = true)
+        showNotification(
+            id,
+            if (audioOnly) "Скачивание аудио…" else "Скачивание…",
+            0, ongoing = true
+        )
 
         return try {
-            val resolved = resolveDirectUrl(url)
-                ?: throw Exception("Не удалось получить ссылку на видео")
+            val resolved = resolveDirectUrl(url, quality, audioOnly)
+                ?: throw Exception("Не удалось получить ссылку на медиа")
 
             repository.getById(id)?.let {
                 repository.update(it.copy(thumbnailUrl = resolved.thumbnail, progress = 5))
@@ -68,28 +74,38 @@ class DownloadWorker(
                 cancelNotificationDelayed(id)
                 Result.success(workDataOf(KEY_FILE to (result.firstUri ?: "")))
             } else {
-                // ============ ВИДЕО (как раньше) ============
-                val videoUrl = resolved.videoUrl
+                // ============ ВИДЕО или АУДИО ============
+                val mediaUrl = resolved.videoUrl
                     ?: throw Exception("Пустой ответ от сервера")
 
-                val tempFile = File(applicationContext.cacheDir, "video_$id.mp4")
-                downloadFile(videoUrl, tempFile, id, repository)
+                val extension = if (audioOnly) "mp3" else "mp4"
+                val tempFile = File(applicationContext.cacheDir, "media_$id.$extension")
+                downloadFile(mediaUrl, tempFile, id, repository, audioOnly)
 
-                val fileName = "video_${id}_${System.currentTimeMillis()}.mp4"
-                val savedPath = saveToPublicDcim(tempFile, fileName, service)
+                val fileName = "${if (audioOnly) "audio" else "video"}_${id}_${System.currentTimeMillis()}.$extension"
+                val savedPath = if (audioOnly) {
+                    saveAudioToPublicDcim(tempFile, fileName, service)
+                } else {
+                    saveToPublicDcim(tempFile, fileName, service)
+                }
                 tempFile.delete()
 
                 repository.getById(id)?.let {
                     repository.update(it.copy(
                         filePath = savedPath,
-                        type = "VIDEO",
+                        folderPath = if (audioOnly) "DCIM/VideoDownloader/$service/Audio" else it.folderPath,
+                        type = if (audioOnly) "AUDIO" else "VIDEO",
                         itemCount = 1,
                         status = "COMPLETED",
                         progress = 100,
                         error = null
                     ))
                 }
-                showNotification(id, "✅ Видео скачано", 100, ongoing = false)
+                showNotification(
+                    id,
+                    if (audioOnly) "✅ Аудио скачано" else "✅ Видео скачано",
+                    100, ongoing = false
+                )
                 cancelNotificationDelayed(id)
                 Result.success(workDataOf(KEY_FILE to savedPath))
             }
@@ -111,7 +127,6 @@ class DownloadWorker(
 
     data class CarouselResult(val firstUri: String?, val folderPath: String)
 
-    /** Скачивает все картинки карусели в DCIM/VideoDownloader/{service}/Photos/album_xxx/ */
     private suspend fun downloadPhotoCarousel(
         imageUrls: List<String>,
         id: Long,
@@ -127,15 +142,10 @@ class DownloadWorker(
                 val tempImg = File(applicationContext.cacheDir, "img_${id}_$index.jpg")
                 downloadFileSimple(imgUrl, tempImg)
 
-                val savedUri = saveImageToDcim(
-                    tempImg,
-                    "photo_${index + 1}.jpg",
-                    albumPath
-                )
+                val savedUri = saveImageToDcim(tempImg, "photo_${index + 1}.jpg", albumPath)
                 if (firstUri == null) firstUri = savedUri
                 tempImg.delete()
 
-                // Обновляем прогресс
                 val percent = 5 + ((index + 1) * 90 / imageUrls.size)
                 repository.getById(id)?.let {
                     repository.update(it.copy(progress = percent))
@@ -149,7 +159,6 @@ class DownloadWorker(
         return CarouselResult(firstUri, albumPath)
     }
 
-    /** Простое скачивание файла (для картинок). */
     private fun downloadFileSimple(url: String, outFile: File) {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
@@ -167,7 +176,6 @@ class DownloadWorker(
         } finally { conn.disconnect() }
     }
 
-    /** Сохраняет картинку в публичную галерею через MediaStore. */
     private fun saveImageToDcim(tempFile: File, fileName: String, relativePath: String): String? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
@@ -193,7 +201,6 @@ class DownloadWorker(
                 return null
             }
         } else {
-            // Android 9 и ниже
             val dir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
                 relativePath.removePrefix("DCIM/")
@@ -204,7 +211,6 @@ class DownloadWorker(
         }
     }
 
-    /** Определяет подпапку по URL. */
     private fun getServiceFolder(url: String): String {
         val lower = url.lowercase()
         return when {
@@ -221,10 +227,24 @@ class DownloadWorker(
         }
     }
 
-    private fun resolveDirectUrl(url: String): Resolved? {
+    private fun resolveDirectUrl(
+        url: String,
+        quality: VideoQuality,
+        audioOnly: Boolean
+    ): Resolved? {
         val lower = url.lowercase()
+
+        // Режим «только аудио»: прямые ссылки не поддерживаются, всё остальное — через Cobalt
+        if (audioOnly) {
+            if (lower.endsWith(".mp4") || lower.endsWith(".webm") ||
+                lower.endsWith(".mov") || lower.endsWith(".m4v")) {
+                throw Exception("Аудио из прямых ссылок не поддерживается")
+            }
+            return resolveCobalt(url, quality, audioOnly = true)
+        }
+
         return when {
-            lower.contains("tiktok.com") -> resolveTikTok(url)
+            lower.contains("tiktok.com") -> resolveTikTok(url, quality)
             lower.contains("youtube.com") || lower.contains("youtu.be") -> resolveViaYtdlp(url)
             lower.contains("instagram.com") -> resolveViaYtdlp(url)
             lower.contains("facebook.com") || lower.contains("fb.watch") ||
@@ -236,20 +256,21 @@ class DownloadWorker(
             lower.contains("rumble.com") || lower.contains("odysee.com") ||
             lower.contains("soundcloud.com") || lower.contains("rutube.ru") ||
             lower.contains("linkedin.com") || lower.contains("threads.net") ||
-            lower.contains("tumblr.com") -> resolveCobalt(url)
+            lower.contains("tumblr.com") -> resolveCobalt(url, quality, audioOnly = false)
 
             lower.endsWith(".mp4") || lower.endsWith(".webm") ||
             lower.endsWith(".mov") || lower.endsWith(".m4v") -> Resolved(videoUrl = url)
 
-            else -> resolveCobalt(url)
+            else -> resolveCobalt(url, quality, audioOnly = false)
         }
     }
 
     // =========================================================
-    // TikTok — через tikwm. Обрабатывает и видео, и фото-карусели.
+    // TikTok — через tikwm. Учитывает качество (hd=1/0).
     // =========================================================
-    private fun resolveTikTok(url: String): Resolved? {
-        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
+    private fun resolveTikTok(url: String, quality: VideoQuality): Resolved? {
+        val hd = quality.tikwmHd
+        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=$hd"
         Log.d(TAG, "GET $api")
 
         val json = httpGetString(api, timeoutMs = 20_000)
@@ -266,7 +287,6 @@ class DownloadWorker(
 
         val cover = data.optString("cover").ifBlank { null }
 
-        // Проверяем, есть ли картинки (фото-карусель)
         val imagesArr = data.optJSONArray("images")
         if (imagesArr != null && imagesArr.length() > 0) {
             val images = mutableListOf<String>()
@@ -280,12 +300,11 @@ class DownloadWorker(
             }
         }
 
-        // Обычное видео
         val video = data.optString("play").ifBlank { null }
             ?: data.optString("hdplay").ifBlank { null }
             ?: throw Exception("tikwm: нет ни видео, ни картинок")
 
-        Log.d(TAG, "TikTok OK (видео)")
+        Log.d(TAG, "TikTok OK (видео, hd=$hd)")
         return Resolved(videoUrl = video, thumbnail = cover)
     }
 
@@ -311,7 +330,11 @@ class DownloadWorker(
         return Resolved(videoUrl = video, thumbnail = thumb)
     }
 
-    private fun resolveCobalt(url: String): Resolved? {
+    private fun resolveCobalt(
+        url: String,
+        quality: VideoQuality,
+        audioOnly: Boolean
+    ): Resolved? {
         val instances = listOf(
             "https://cobalt-api.kwiatekmiki.com/",
             "https://co.eepy.today/",
@@ -320,7 +343,11 @@ class DownloadWorker(
             "https://api.cobalt.best/",
             COBALT_URL
         )
-        val body = """{"url":"$url","videoQuality":"max"}"""
+        val body = if (audioOnly) {
+            """{"url":"$url","audioOnly":true,"audioFormat":"mp3"}"""
+        } else {
+            """{"url":"$url","videoQuality":"${quality.cobaltValue}"}"""
+        }
         var lastError = "Нет инстансов"
 
         for (base in instances) {
@@ -331,14 +358,14 @@ class DownloadWorker(
                     lastError = obj.optJSONObject("error")?.optString("code") ?: "unknown"
                     continue
                 }
-                val video = obj.optString("url").ifBlank {
+                val media = obj.optString("url").ifBlank {
                     val picker = obj.optJSONArray("picker")
                     if (picker != null && picker.length() > 0)
                         picker.getJSONObject(0).optString("url", "")
                     else ""
                 }.ifBlank { null } ?: continue
                 val thumb = obj.optString("thumbnail").ifBlank { null }
-                return Resolved(videoUrl = video, thumbnail = thumb)
+                return Resolved(videoUrl = media, thumbnail = thumb)
             } catch (e: Exception) {
                 lastError = e.message ?: "unknown"
             }
@@ -386,7 +413,8 @@ class DownloadWorker(
         url: String,
         outFile: File,
         id: Long,
-        repository: DownloadRepository
+        repository: DownloadRepository,
+        audioOnly: Boolean
     ) {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
@@ -394,6 +422,7 @@ class DownloadWorker(
             instanceFollowRedirects = true
             setRequestProperty("User-Agent", USER_AGENT)
         }
+        val action = if (audioOnly) "Скачивание аудио…" else "Скачивание…"
         try {
             if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
             val total = conn.contentLengthLong
@@ -413,7 +442,7 @@ class DownloadWorker(
                             }
                             if (percent - lastNotified >= 10) {
                                 lastNotified = percent
-                                showNotification(id, "Скачивание… $percent%", percent, ongoing = true)
+                                showNotification(id, "$action $percent%", percent, ongoing = true)
                             }
                         }
                     }
@@ -454,6 +483,39 @@ class DownloadWorker(
         }
     }
 
+    /** Сохраняет аудио в DCIM/VideoDownloader/{service}/Audio/ как .mp3 */
+    private fun saveAudioToPublicDcim(tempFile: File, fileName: String, service: String): String {
+        val relativePath = Environment.DIRECTORY_DCIM + "/VideoDownloader/" + service + "/Audio/"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mpeg")
+                put(MediaStore.Audio.Media.RELATIVE_PATH, relativePath)
+                put(MediaStore.Audio.Media.IS_PENDING, 1)
+            }
+            val resolver = applicationContext.contentResolver
+            val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw Exception("Не удалось создать аудио в MediaStore")
+            resolver.openOutputStream(uri).use { out ->
+                if (out == null) throw Exception("Не удалось открыть поток")
+                tempFile.inputStream().use { input -> input.copyTo(out, 64 * 1024) }
+            }
+            values.clear()
+            values.put(MediaStore.Audio.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            return uri.toString()
+        } else {
+            val dir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                "VideoDownloader/$service/Audio"
+            ).apply { mkdirs() }
+            val target = File(dir, fileName)
+            tempFile.copyTo(target, overwrite = true)
+            return target.absolutePath
+        }
+    }
+
     private fun showNotification(id: Long, text: String, progress: Int, ongoing: Boolean) {
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channelId = "downloads"
@@ -483,6 +545,8 @@ class DownloadWorker(
         private const val TAG = "DownloadWorker"
         const val KEY_URL = "url"
         const val KEY_ID = "id"
+        const val KEY_QUALITY = "quality"
+        const val KEY_AUDIO = "audio"
         const val KEY_PROGRESS = "progress"
         const val KEY_FILE = "file"
         const val KEY_ERROR = "error"
