@@ -9,12 +9,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,6 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkManager
 import com.example.videodownloader.BuildConfig
+import com.example.videodownloader.data.settings.SettingsRepository
+import com.example.videodownloader.data.settings.VideoQuality
 import com.example.videodownloader.util.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,13 +41,20 @@ import java.io.File
 @Composable
 fun SettingsScreen(onChooseFolder: () -> Unit) {
     val context = LocalContext.current
+    val settings = remember { SettingsRepository(context) }
+    val scope = rememberCoroutineScope()
+
     var showInstagramHelp by remember { mutableStateOf(false) }
     var showYoutubeHelp by remember { mutableStateOf(false) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
-
-    // Состояние для показа диалогов
     var showRulesDialog by remember { mutableStateOf(false) }
     var showSecurityDialog by remember { mutableStateOf(false) }
+    var showQualityDialog by remember { mutableStateOf(false) }
+
+    val videoQuality by settings.videoQuality.collectAsState(initial = VideoQuality.MAX)
+    val audioOnly by settings.audioOnly.collectAsState(initial = false)
+    val autoPaste by settings.autoPaste.collectAsState(initial = false)
+    val autoDownload by settings.autoDownload.collectAsState(initial = false)
 
     val cookiesPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -79,7 +92,43 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
         return
     }
 
-    // Composable-диалоги
+    // Диалог выбора качества
+    if (showQualityDialog) {
+        AlertDialog(
+            onDismissRequest = { showQualityDialog = false },
+            title = { Text("Качество видео") },
+            text = {
+                Column {
+                    VideoQuality.entries.forEach { q ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch { settings.setVideoQuality(q) }
+                                    showQualityDialog = false
+                                }
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = videoQuality == q,
+                                onClick = {
+                                    scope.launch { settings.setVideoQuality(q) }
+                                    showQualityDialog = false
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(q.label, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showQualityDialog = false }) { Text("Закрыть") }
+            }
+        )
+    }
+
     if (showRulesDialog) {
         AlertDialog(
             onDismissRequest = { showRulesDialog = false },
@@ -92,9 +141,7 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = { showRulesDialog = false }) {
-                    Text("Понятно")
-                }
+                TextButton(onClick = { showRulesDialog = false }) { Text("Понятно") }
             }
         )
     }
@@ -111,9 +158,7 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = { showSecurityDialog = false }) {
-                    Text("Понятно")
-                }
+                TextButton(onClick = { showSecurityDialog = false }) { Text("Понятно") }
             }
         )
     }
@@ -130,6 +175,51 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 8.dp)
         )
+
+        // ============ РАЗДЕЛ: ЗАГРУЗКА ============
+        SectionHeader("Загрузка")
+
+        SettingItem(
+            icon = Icons.Default.Tune,
+            title = "Качество видео",
+            subtitle = videoQuality.label,
+            onClick = { showQualityDialog = true }
+        )
+
+        SettingSwitch(
+            icon = Icons.Default.ContentPaste,
+            title = "Автопаста из буфера",
+            subtitle = "Подставлять ссылку автоматически",
+            checked = autoPaste,
+            onCheckedChange = { scope.launch { settings.setAutoPaste(it) } }
+        )
+
+        SettingSwitch(
+            icon = Icons.Default.Download,
+            title = "Автоскачивание",
+            subtitle = if (audioOnly) "Недоступно в режиме «Только аудио»"
+                       else "Начинать скачивание сразу после вставки",
+            checked = autoDownload && !audioOnly,
+            enabled = !audioOnly,
+            onCheckedChange = { scope.launch { settings.setAutoDownload(it) } }
+        )
+
+        SettingSwitch(
+            icon = Icons.Default.MusicNote,
+            title = "Только аудио",
+            subtitle = "Скачивать только звук (M4A)",
+            checked = audioOnly,
+            onCheckedChange = { enabled ->
+                scope.launch {
+                    settings.setAudioOnly(enabled)
+                    if (enabled && autoDownload) {
+                        settings.setAutoDownload(false)
+                    }
+                }
+            }
+        )
+
+        Spacer(Modifier.height(16.dp))
 
         // ============ РАЗДЕЛ: ФАЙЛЫ ============
         SectionHeader("Файлы")
@@ -287,6 +377,55 @@ private fun SettingItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingSwitch(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Row(
+            Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (enabled) MaterialTheme.colorScheme.primary
+                       else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = if (enabled) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = checked,
+                enabled = enabled,
+                onCheckedChange = onCheckedChange
+            )
         }
     }
 }
