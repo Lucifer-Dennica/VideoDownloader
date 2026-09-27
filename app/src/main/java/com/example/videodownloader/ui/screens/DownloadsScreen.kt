@@ -1,9 +1,8 @@
 package com.example.videodownloader.ui.screens
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.storage.StorageManager
+import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -58,7 +57,7 @@ fun DownloadsScreen(
                     DownloadItemCard(
                         item = item,
                         onDelete = { onDelete(item) },
-                        onOpen = { openVideo(context, it) },
+                        onOpen = { openItem(context, it) },
                         onOpenFolder = { openFolder(context, it) }
                     )
                 }
@@ -67,11 +66,13 @@ fun DownloadsScreen(
     }
 }
 
-private fun openVideo(context: Context, item: DownloadEntity) {
+private fun openItem(context: android.content.Context, item: DownloadEntity) {
     val path = item.filePath ?: run {
         Toast.makeText(context, "Файл не найден", Toast.LENGTH_SHORT).show()
         return
     }
+
+    val mimeType = if (item.type == "PHOTOS") "image/*" else "video/mp4"
 
     val uri: Uri = if (path.startsWith("content://")) {
         Uri.parse(path)
@@ -85,7 +86,7 @@ private fun openVideo(context: Context, item: DownloadEntity) {
     }
 
     val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, "video/mp4")
+        setDataAndType(uri, mimeType)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
@@ -97,68 +98,42 @@ private fun openVideo(context: Context, item: DownloadEntity) {
     }
 }
 
-/**
- * Открывает папку с видео через системный DocumentsUI.
- * Использует StorageManager.createOpenDocumentTreeIntent() — это работает
- * на Android 5+ и открывается в любом стандартном файловом менеджере.
- */
-private fun openFolder(context: Context, item: DownloadEntity) {
+private fun openFolder(context: android.content.Context, item: DownloadEntity) {
     val service = detectService(item)
-    val fullPath = "DCIM/VideoDownloader/$service"
+    val path = when {
+        item.type == "PHOTOS" && item.folderPath != null -> item.folderPath
+        else -> "DCIM/VideoDownloader/$service"
+    }
 
-    // Способ 1: через StorageManager — самый надёжный
+    // Способ 1: file:// (старые файловые менеджеры)
     try {
-        val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
-        val volume = storageManager.primaryStorageVolume
-        val intent = volume.createOpenDocumentTreeIntent()
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(
+                Uri.parse("file://${Environment.getExternalStorageDirectory()}/$path"),
+                "resource/folder"
+            )
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+        return
+    } catch (_: Exception) { }
 
-        val initialUri = Uri.parse(
-            "content://com.android.externalstorage.documents/root/primary%3A" +
-                    Uri.encode(fullPath)
+    // Способ 2: через ExternalStorageProvider
+    try {
+        val encodedPath = Uri.encode(path)
+        val folderUri = Uri.parse(
+            "content://com.android.externalstorage.documents/document/primary%3A$encodedPath"
         )
-        intent.putExtra("android.provider.extra.INITIAL_URI", initialUri)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(folderUri, "vnd.android.document/directory")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         context.startActivity(intent)
         return
     } catch (_: Exception) { }
 
-    // Способ 2: открыть корень VideoDownloader
-    try {
-        val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
-        val volume = storageManager.primaryStorageVolume
-        val intent = volume.createOpenDocumentTreeIntent()
-
-        val rootUri = Uri.parse(
-            "content://com.android.externalstorage.documents/root/primary%3A" +
-                    Uri.encode("DCIM/VideoDownloader")
-        )
-        intent.putExtra("android.provider.extra.INITIAL_URI", rootUri)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        return
-    } catch (_: Exception) { }
-
-    // Способ 3: просто открыть выбор папок
-    try {
-        val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
-        val volume = storageManager.primaryStorageVolume
-        val intent = volume.createOpenDocumentTreeIntent()
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        Toast.makeText(
-            context,
-            "Найдите папку: $fullPath",
-            Toast.LENGTH_LONG
-        ).show()
-        return
-    } catch (_: Exception) { }
-
-    // Если ничего не сработало — показываем путь
-    Toast.makeText(
-        context,
-        "Путь: $fullPath",
-        Toast.LENGTH_LONG
-    ).show()
+    Toast.makeText(context, "Путь: $path", Toast.LENGTH_LONG).show()
 }
 
 private fun detectService(item: DownloadEntity): String {
@@ -173,18 +148,13 @@ private fun detectService(item: DownloadEntity): String {
                 path.contains("instagram") -> "Instagram"
         url.contains("facebook") || url.contains("fb.watch") ||
                 title.contains("facebook") || path.contains("facebook") -> "Facebook"
-        url.contains("vk.com") || title.contains("vk") || path.contains("vk") -> "VK"
         url.contains("twitter") || url.contains("x.com") ||
                 title.contains("twitter") || path.contains("twitter") -> "Twitter"
+        url.contains("vk.com") || path.contains("vk") -> "VK"
         url.contains("reddit") || path.contains("reddit") -> "Reddit"
         url.contains("pinterest") || url.contains("pin.it") ||
                 path.contains("pinterest") -> "Pinterest"
         url.contains("snapchat") || path.contains("snapchat") -> "Snapchat"
-        url.contains("vimeo") || path.contains("vimeo") -> "Vimeo"
-        url.contains("dailymotion") || path.contains("dailymotion") -> "Dailymotion"
-        url.contains("twitch") || path.contains("twitch") -> "Twitch"
-        url.contains("rutube") || path.contains("rutube") -> "Rutube"
-        url.contains("soundcloud") || path.contains("soundcloud") -> "SoundCloud"
         else -> "Другое"
     }
 }
