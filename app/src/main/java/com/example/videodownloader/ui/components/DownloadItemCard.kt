@@ -1,8 +1,9 @@
 package com.example.videodownloader.ui.components
 
 import android.text.format.Formatter
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -24,12 +25,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DownloadItemCard(
     item: DownloadEntity,
+    selectionMode: Boolean,
+    selected: Boolean,
     onDelete: () -> Unit,
     onOpen: (DownloadEntity) -> Unit,
-    onOpenFolder: (DownloadEntity) -> Unit
+    onOpenFolder: (DownloadEntity) -> Unit,
+    onShare: (DownloadEntity) -> Unit,
+    onLongClick: () -> Unit,
+    onToggleSelect: () -> Unit
 ) {
     val context = LocalContext.current
 
@@ -49,28 +56,41 @@ fun DownloadItemCard(
     }
 
     val isCarousel = item.type == "PHOTOS"
+    val isAudio = item.type == "AUDIO"
+
+    val containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
+                         else MaterialTheme.colorScheme.surfaceVariant
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable { if (item.status == "COMPLETED") onOpen(item) },
+            .combinedClickable(
+                onClick = {
+                    when {
+                        selectionMode -> onToggleSelect()
+                        item.status == "COMPLETED" -> onOpen(item)
+                    }
+                },
+                onLongClick = {
+                    if (!selectionMode) onLongClick()
+                }
+            ),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 3.dp else 1.dp)
     ) {
         Row(
             Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (selectionMode) {
+                Checkbox(checked = selected, onCheckedChange = { onToggleSelect() })
+                Spacer(Modifier.width(4.dp))
+            }
+
             Box {
                 if (item.thumbnailUrl != null) {
-                    // Формируем правильную модель для Coil:
-                    // - content:// → строка (работает)
-                    // - http(s):// → строка (работает)
-                    // - локальный путь → File (обязательно!)
                     val model: Any = when {
                         item.thumbnailUrl.startsWith("content://") -> item.thumbnailUrl
                         item.thumbnailUrl.startsWith("http") -> item.thumbnailUrl
@@ -100,20 +120,27 @@ fun DownloadItemCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            if (isCarousel) "🖼" else "🎬",
+                            when {
+                                isCarousel -> "🖼"
+                                isAudio -> "🎵"
+                                else -> "🎬"
+                            },
                             style = MaterialTheme.typography.titleLarge
                         )
                     }
                 }
 
-                // Бейдж типа
                 Surface(
                     color = MaterialTheme.colorScheme.primary,
                     shape = RoundedCornerShape(topStart = 0.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 0.dp),
                     modifier = Modifier.align(Alignment.BottomEnd)
                 ) {
                     Text(
-                        if (isCarousel) "${item.itemCount} 🖼" else "🎬",
+                        when {
+                            isCarousel -> "${item.itemCount} 🖼"
+                            isAudio -> "🎵"
+                            else -> "🎬"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -151,7 +178,11 @@ fun DownloadItemCard(
                 val statusText = when (item.status) {
                     "QUEUED" -> "⏳ В очереди"
                     "DOWNLOADING" -> "⬇️ ${item.progress}%"
-                    "COMPLETED" -> if (isCarousel) "✅ Готово (${item.itemCount} фото)" else "✅ Готово"
+                    "COMPLETED" -> when {
+                        isCarousel -> "✅ Готово (${item.itemCount} фото)"
+                        isAudio -> "✅ Аудио готово"
+                        else -> "✅ Готово"
+                    }
                     "ERROR" -> "❌ Ошибка"
                     else -> item.status
                 }
@@ -185,21 +216,30 @@ fun DownloadItemCard(
                 }
             }
 
-            Spacer(Modifier.width(4.dp))
-
-            if (item.status == "COMPLETED") {
-                IconButton(
-                    onClick = { onOpenFolder(item) },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Text("📁", style = MaterialTheme.typography.titleMedium)
+            if (!selectionMode) {
+                Spacer(Modifier.width(4.dp))
+                Column {
+                    if (item.status == "COMPLETED") {
+                        IconButton(
+                            onClick = { onOpenFolder(item) },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Text("📁", style = MaterialTheme.typography.titleMedium)
+                        }
+                        IconButton(
+                            onClick = { onShare(item) },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Text("📤", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Text("🗑", style = MaterialTheme.typography.titleMedium)
+                    }
                 }
-            }
-            IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Text("🗑", style = MaterialTheme.typography.titleMedium)
             }
         }
     }
