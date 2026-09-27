@@ -33,13 +33,14 @@ fun HomeScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var link by remember(initialLink) { mutableStateOf(initialLink) }
-    val parsed = UrlParser.parse(link)
+
+    // ⚠️ Кэшируем парсинг — не гоняем Uri.parse на каждый recompose
+    val parsed = remember(link) { UrlParser.parse(link) }
 
     val autoPaste by settings.autoPaste.collectAsState(initial = false)
     val autoDownload by settings.autoDownload.collectAsState(initial = false)
     val audioOnly by settings.audioOnly.collectAsState(initial = false)
 
-    // ---- Автопаста из буфера при возврате в приложение ----
     DisposableEffect(lifecycleOwner, autoPaste) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME && autoPaste && link.isBlank()) {
@@ -57,7 +58,6 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ---- Автоскачивание с дебаунсом 800 мс ----
     LaunchedEffect(link, autoDownload, audioOnly) {
         if (!autoDownload || audioOnly) return@LaunchedEffect
         if (link.isBlank()) return@LaunchedEffect
@@ -80,7 +80,6 @@ fun HomeScreen(
             AssistChip(onClick = {}, label = { Text("Источник: ${parsed.service}") })
         }
 
-        // ---- Кнопки скачивания ----
         if (audioOnly) {
             Row(
                 Modifier.fillMaxWidth(),
