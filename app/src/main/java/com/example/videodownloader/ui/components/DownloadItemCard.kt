@@ -1,6 +1,5 @@
 package com.example.videodownloader.ui.components
 
-import android.text.format.Formatter
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -40,17 +39,6 @@ fun DownloadItemCard(
 ) {
     val context = LocalContext.current
 
-    val fileSize = remember(item.filePath) {
-        val path = item.filePath ?: return@remember null
-        try {
-            if (path.startsWith("content://")) null
-            else {
-                val f = File(path)
-                if (f.exists()) Formatter.formatShortFileSize(context, f.length()) else null
-            }
-        } catch (e: Exception) { null }
-    }
-
     val dateText = remember(item.createdAt) {
         SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.createdAt))
     }
@@ -89,7 +77,13 @@ fun DownloadItemCard(
                 Spacer(Modifier.width(4.dp))
             }
 
-            Box {
+            // --- Превью ---
+            Box(
+                modifier = Modifier
+                    .width(124.dp)
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(8.dp))
+            ) {
                 if (item.thumbnailUrl != null) {
                     val model: Any = when {
                         item.thumbnailUrl.startsWith("content://") -> item.thumbnailUrl
@@ -97,25 +91,19 @@ fun DownloadItemCard(
                         item.thumbnailUrl.startsWith("/") -> File(item.thumbnailUrl)
                         else -> item.thumbnailUrl
                     }
-
                     AsyncImage(
                         model = ImageRequest.Builder(context)
                             .data(model)
                             .crossfade(true)
                             .build(),
                         contentDescription = null,
-                        modifier = Modifier
-                            .width(100.dp)
-                            .aspectRatio(16f / 9f)
-                            .clip(RoundedCornerShape(8.dp)),
+                        modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .width(100.dp)
-                            .aspectRatio(16f / 9f)
-                            .clip(RoundedCornerShape(8.dp))
+                            .fillMaxSize()
                             .background(MaterialTheme.colorScheme.surface),
                         contentAlignment = Alignment.Center
                     ) {
@@ -125,15 +113,16 @@ fun DownloadItemCard(
                                 isAudio -> "🎵"
                                 else -> "🎬"
                             },
-                            style = MaterialTheme.typography.titleLarge
+                            style = MaterialTheme.typography.displaySmall
                         )
                     }
                 }
 
+                // Бейдж типа в правом верхнем углу превью
                 Surface(
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(topStart = 0.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 0.dp),
-                    modifier = Modifier.align(Alignment.BottomEnd)
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                    shape = RoundedCornerShape(bottomStart = 6.dp, topEnd = 8.dp),
+                    modifier = Modifier.align(Alignment.TopEnd)
                 ) {
                     Text(
                         when {
@@ -143,13 +132,14 @@ fun DownloadItemCard(
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                     )
                 }
             }
 
             Spacer(Modifier.width(12.dp))
 
+            // --- Текст ---
             Column(Modifier.weight(1f)) {
                 Text(
                     item.title,
@@ -159,21 +149,12 @@ fun DownloadItemCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(2.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        dateText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    fileSize?.let {
-                        Text(
-                            "• $it",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Spacer(Modifier.height(2.dp))
+                Text(
+                    dateText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(3.dp))
 
                 val statusText = when (item.status) {
                     "QUEUED" -> "⏳ В очереди"
@@ -216,31 +197,31 @@ fun DownloadItemCard(
                 }
             }
 
+            // --- Кнопки: вертикально, компактно ---
             if (!selectionMode) {
                 Spacer(Modifier.width(4.dp))
-                Column {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
                     if (item.status == "COMPLETED") {
-                        IconButton(
-                            onClick = { onOpenFolder(item) },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Text("📁", style = MaterialTheme.typography.titleMedium)
-                        }
-                        IconButton(
-                            onClick = { onShare(item) },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Text("📤", style = MaterialTheme.typography.titleMedium)
-                        }
+                        CardActionButton("📁", onOpenFolder)
+                        CardActionButton("📤", onShare)
                     }
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Text("🗑", style = MaterialTheme.typography.titleMedium)
-                    }
+                    CardActionButton("🗑", onDelete)
                 }
             }
         }
+    }
+}
+
+/** Компактная иконка-кнопка 32dp без лишних отступов. */
+@Composable
+private fun CardActionButton(emoji: String, onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(32.dp)
+    ) {
+        Text(emoji, style = MaterialTheme.typography.titleSmall)
     }
 }
