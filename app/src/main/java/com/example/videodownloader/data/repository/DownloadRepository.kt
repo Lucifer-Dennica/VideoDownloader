@@ -29,7 +29,6 @@ class DownloadRepository(context: Context) {
     suspend fun update(item: DownloadEntity) = dao.update(item)
     suspend fun delete(item: DownloadEntity) = dao.delete(item)
 
-    /** Удаляет запись + сам файл(ы) из памяти. */
     suspend fun deleteWithFile(item: DownloadEntity) = withContext(Dispatchers.IO) {
         try {
             if (item.type == "PHOTOS" && !item.folderPath.isNullOrBlank()) {
@@ -85,7 +84,6 @@ class DownloadRepository(context: Context) {
         scanPhotos()
     }
 
-    // ---------- ВИДЕО ----------
     private suspend fun scanVideos() {
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
@@ -146,7 +144,10 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    // ---------- АУДИО ----------
+    /**
+     * Аудио теперь лежит в Music/VideoDownloader/{service}/Audio/.
+     * Фильтр — просто %VideoDownloader%, чтобы ловилось независимо от корневой папки.
+     */
     private suspend fun scanAudio() {
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
@@ -155,7 +156,7 @@ class DownloadRepository(context: Context) {
             MediaStore.Audio.Media.RELATIVE_PATH
         )
         val selection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
-        val selectionArgs = arrayOf("%DCIM/VideoDownloader%")
+        val selectionArgs = arrayOf("%VideoDownloader%")
 
         try {
             appContext.contentResolver.query(
@@ -234,7 +235,6 @@ class DownloadRepository(context: Context) {
             }
         }
 
-    // ---------- ФОТО ----------
     private suspend fun scanPhotos() {
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
