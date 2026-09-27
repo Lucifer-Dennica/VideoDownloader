@@ -324,6 +324,10 @@ class DownloadWorker(
         return Resolved(videoUrl = video, thumbnail = thumb)
     }
 
+    /**
+     * Cobalt — перебираем 5 разных тел запроса для аудио (разные ревизии API).
+     * Для видео — 2 тела. Порядок: сначала новый API (v10), потом старый.
+     */
     private fun resolveCobalt(
         url: String,
         quality: VideoQuality,
@@ -340,7 +344,15 @@ class DownloadWorker(
 
         val bodies = if (audioOnly) {
             listOf(
+                // Cobalt v10, новый API
                 """{"url":"$url","downloadMode":"audio","audioFormat":"mp3"}""",
+                // Cobalt v10 без явного формата
+                """{"url":"$url","downloadMode":"audio"}""",
+                // Cobalt v10 с best-качеством
+                """{"url":"$url","downloadMode":"audio","audioFormat":"best"}""",
+                // Cobalt v7-v9, старый API
+                """{"url":"$url","isAudioOnly":true}""",
+                // Cobalt v7-v9 с форматом
                 """{"url":"$url","isAudioOnly":true,"aFormat":"mp3"}"""
             )
         } else {
@@ -353,7 +365,7 @@ class DownloadWorker(
         var lastError = "Нет инстансов"
 
         for (base in instances) {
-            for (body in bodies) {
+            for ((idx, body) in bodies.withIndex()) {
                 try {
                     val response = httpPostJson(base, body, timeoutMs = 15_000) ?: continue
                     val obj = JSONObject(response)
@@ -361,7 +373,7 @@ class DownloadWorker(
                     if (status == "error") {
                         val code = obj.optJSONObject("error")?.optString("code") ?: "unknown"
                         lastError = "Cobalt: $code"
-                        Log.w(TAG, "Cobalt $base отдал $code, пробуем другой формат")
+                        Log.w(TAG, "Cobalt $base [вариант ${idx + 1}/${bodies.size}] → $code")
                         continue
                     }
                     if (status != "tunnel" && status != "redirect" && status != "stream") {
@@ -375,7 +387,7 @@ class DownloadWorker(
                         else ""
                     }.ifBlank { null } ?: continue
                     val thumb = obj.optString("thumbnail").ifBlank { null }
-                    Log.d(TAG, "Cobalt OK через $base")
+                    Log.d(TAG, "Cobalt OK через $base (вариант ${idx + 1})")
                     return Resolved(videoUrl = media, thumbnail = thumb)
                 } catch (e: Exception) {
                     lastError = e.message ?: "unknown"
@@ -498,8 +510,8 @@ class DownloadWorker(
     }
 
     /**
-     * Сохраняет аудио в Music/VideoDownloader/{service}/Audio/ как .mp3.
-     * Android разрешает для аудио только Music/Alarms/Ringtones/... — DCIM нельзя.
+     * Аудио сохраняем в Music/VideoDownloader/{service}/Audio/ — Android запрещает
+     * аудио в DCIM (allowed: Music, Alarms, Ringtones, Notifications, Podcasts...).
      */
     private fun saveAudioToPublicMusic(tempFile: File, fileName: String, service: String): String {
         val relativePath = Environment.DIRECTORY_MUSIC + "/VideoDownloader/" + service + "/Audio/"
