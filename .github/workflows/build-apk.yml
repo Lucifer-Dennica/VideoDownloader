@@ -57,30 +57,26 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/VideoDownloader-v1.6.2.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release/VideoDownloader-v1.6.3.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-v1.6.2
-          path: release/VideoDownloader-v1.6.2.apk
+          name: VideoDownloader-v1.6.3
+          path: release/VideoDownloader-v1.6.3.apk
           if-no-files-found: error
 
       - name: Attach APK to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/VideoDownloader-v1.6.2.apk
+          files: release/VideoDownloader-v1.6.3.apk
           tag_name: ${{ github.event.release.tag_name }}
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Выбор качества видео (до 360p)
-            - Автопаста из буфера
-            - Автоскачивание
-            - Режим «Только аудио» (mp3, Music/VideoDownloader/)
-            - Мультивыбор: поделиться/удалить
-            - Удаление файлов из памяти
-            - Фикс: одно окно приложения (singleTask)
+            - Fix: ссылка из «Поделиться» снова попадает в поле (onNewIntent)
+            - Fix: аудио — 5 вариантов Cobalt API, Music/VideoDownloader/
+            - Fix: разрешение READ_MEDIA_AUDIO
           draft: false
           prerelease: false
