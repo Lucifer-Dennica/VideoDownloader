@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -43,31 +44,55 @@ class DownloadWorker(
             val resolved = resolveDirectUrl(url)
                 ?: throw Exception("Не удалось получить ссылку на видео")
 
-            Log.d(TAG, "resolved: ${resolved.videoUrl.take(80)}...")
-
             repository.getById(id)?.let {
                 repository.update(it.copy(thumbnailUrl = resolved.thumbnail, progress = 5))
             }
 
-            val tempFile = File(applicationContext.cacheDir, "video_$id.mp4")
-            downloadFile(resolved.videoUrl, tempFile, id, repository)
+            if (resolved.imageUrls.isNotEmpty()) {
+                // ============ ФОТО-КАРУСЕЛЬ ============
+                Log.d(TAG, "Это фото-карусель: ${resolved.imageUrls.size} фото")
+                val result = downloadPhotoCarousel(resolved.imageUrls, id, service, repository)
 
-            val fileName = "video_${id}_${System.currentTimeMillis()}.mp4"
-            val savedPath = saveToPublicDcim(tempFile, fileName, service)
-            tempFile.delete()
+                repository.getById(id)?.let {
+                    repository.update(it.copy(
+                        filePath = result.firstUri,
+                        folderPath = result.folderPath,
+                        type = "PHOTOS",
+                        itemCount = resolved.imageUrls.size,
+                        status = "COMPLETED",
+                        progress = 100,
+                        error = null
+                    ))
+                }
+                showNotification(id, "✅ ${resolved.imageUrls.size} фото скачано", 100, ongoing = false)
+                cancelNotificationDelayed(id)
+                Result.success(workDataOf(KEY_FILE to (result.firstUri ?: "")))
+            } else {
+                // ============ ВИДЕО (как раньше) ============
+                val videoUrl = resolved.videoUrl
+                    ?: throw Exception("Пустой ответ от сервера")
 
-            repository.getById(id)?.let {
-                repository.update(it.copy(
-                    filePath = savedPath,
-                    status = "COMPLETED",
-                    progress = 100,
-                    error = null
-                ))
+                val tempFile = File(applicationContext.cacheDir, "video_$id.mp4")
+                downloadFile(videoUrl, tempFile, id, repository)
+
+                val fileName = "video_${id}_${System.currentTimeMillis()}.mp4"
+                val savedPath = saveToPublicDcim(tempFile, fileName, service)
+                tempFile.delete()
+
+                repository.getById(id)?.let {
+                    repository.update(it.copy(
+                        filePath = savedPath,
+                        type = "VIDEO",
+                        itemCount = 1,
+                        status = "COMPLETED",
+                        progress = 100,
+                        error = null
+                    ))
+                }
+                showNotification(id, "✅ Видео скачано", 100, ongoing = false)
+                cancelNotificationDelayed(id)
+                Result.success(workDataOf(KEY_FILE to savedPath))
             }
-            showNotification(id, "✅ Видео скачано", 100, ongoing = false)
-            cancelNotificationDelayed(id)
-            Log.d(TAG, "=== Готово: $savedPath ===")
-            Result.success(workDataOf(KEY_FILE to savedPath))
         } catch (e: Exception) {
             Log.e(TAG, "=== Ошибка ===", e)
             repository.getById(id)?.let {
@@ -78,8 +103,108 @@ class DownloadWorker(
         }
     }
 
-    data class Resolved(val videoUrl: String, val thumbnail: String?)
+    data class Resolved(
+        val videoUrl: String? = null,
+        val imageUrls: List<String> = emptyList(),
+        val thumbnail: String? = null
+    )
 
+    data class CarouselResult(val firstUri: String?, val folderPath: String)
+
+    /** Скачивает все картинки карусели в DCIM/VideoDownloader/{service}/Photos/album_xxx/ */
+    private suspend fun downloadPhotoCarousel(
+        imageUrls: List<String>,
+        id: Long,
+        service: String,
+        repository: DownloadRepository
+    ): CarouselResult {
+        val albumName = "album_${id}_${System.currentTimeMillis()}"
+        val albumPath = "DCIM/VideoDownloader/$service/Photos/$albumName"
+        var firstUri: String? = null
+
+        for ((index, imgUrl) in imageUrls.withIndex()) {
+            try {
+                val tempImg = File(applicationContext.cacheDir, "img_${id}_$index.jpg")
+                downloadFileSimple(imgUrl, tempImg)
+
+                val savedUri = saveImageToDcim(
+                    tempImg,
+                    "photo_${index + 1}.jpg",
+                    albumPath
+                )
+                if (firstUri == null) firstUri = savedUri
+                tempImg.delete()
+
+                // Обновляем прогресс
+                val percent = 5 + ((index + 1) * 90 / imageUrls.size)
+                repository.getById(id)?.let {
+                    repository.update(it.copy(progress = percent))
+                }
+                showNotification(id, "Скачивание фото ${index + 1}/${imageUrls.size}", percent, true)
+            } catch (e: Exception) {
+                Log.w(TAG, "Не удалось скачать фото $index: ${e.message}")
+            }
+        }
+
+        return CarouselResult(firstUri, albumPath)
+    }
+
+    /** Простое скачивание файла (для картинок). */
+    private fun downloadFileSimple(url: String, outFile: File) {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        try {
+            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            conn.inputStream.use { input ->
+                outFile.outputStream().use { output ->
+                    input.copyTo(output, 64 * 1024)
+                }
+            }
+        } finally { conn.disconnect() }
+    }
+
+    /** Сохраняет картинку в публичную галерею через MediaStore. */
+    private fun saveImageToDcim(tempFile: File, fileName: String, relativePath: String): String? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, relativePath)
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val resolver = applicationContext.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return null
+            try {
+                resolver.openOutputStream(uri).use { out ->
+                    if (out == null) return null
+                    tempFile.inputStream().use { input -> input.copyTo(out, 64 * 1024) }
+                }
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                return uri.toString()
+            } catch (e: Exception) {
+                Log.e(TAG, "saveImageToDcim error", e)
+                return null
+            }
+        } else {
+            // Android 9 и ниже
+            val dir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                relativePath.removePrefix("DCIM/")
+            ).apply { mkdirs() }
+            val target = File(dir, fileName)
+            tempFile.copyTo(target, overwrite = true)
+            return target.absolutePath
+        }
+    }
+
+    /** Определяет подпапку по URL. */
     private fun getServiceFolder(url: String): String {
         val lower = url.lowercase()
         return when {
@@ -92,53 +217,36 @@ class DownloadWorker(
             lower.contains("reddit.com") -> "Reddit"
             lower.contains("pinterest.com") || lower.contains("pin.it") -> "Pinterest"
             lower.contains("snapchat.com") -> "Snapchat"
-            lower.contains("vimeo.com") -> "Vimeo"
-            lower.contains("dailymotion.com") -> "Dailymotion"
-            lower.contains("twitch.tv") -> "Twitch"
-            lower.contains("rutube.ru") -> "Rutube"
-            lower.contains("soundcloud.com") -> "SoundCloud"
             else -> "Другое"
         }
     }
 
-    /**
-     * TikTok → tikwm (быстрее, не трогаем)
-     * YouTube, Instagram, VK, Facebook → yt-dlp сервер
-     * Остальные → Cobalt
-     */
     private fun resolveDirectUrl(url: String): Resolved? {
         val lower = url.lowercase()
         return when {
-            // TikTok — через tikwm (не трогаем)
             lower.contains("tiktok.com") -> resolveTikTok(url)
-
-            // YouTube, Instagram, VK, Facebook — через yt-dlp
             lower.contains("youtube.com") || lower.contains("youtu.be") -> resolveViaYtdlp(url)
             lower.contains("instagram.com") -> resolveViaYtdlp(url)
-            lower.contains("vk.com") -> resolveViaYtdlp(url)
-            lower.contains("facebook.com") || lower.contains("fb.watch") -> resolveViaYtdlp(url)
+            lower.contains("facebook.com") || lower.contains("fb.watch") ||
+            lower.contains("vk.com") || lower.contains("twitter.com") ||
+            lower.contains("x.com") || lower.contains("reddit.com") ||
+            lower.contains("pinterest.com") || lower.contains("pin.it") ||
+            lower.contains("snapchat.com") || lower.contains("vimeo.com") ||
+            lower.contains("dailymotion.com") || lower.contains("twitch.tv") ||
+            lower.contains("rumble.com") || lower.contains("odysee.com") ||
+            lower.contains("soundcloud.com") || lower.contains("rutube.ru") ||
+            lower.contains("linkedin.com") || lower.contains("threads.net") ||
+            lower.contains("tumblr.com") -> resolveCobalt(url)
 
-            // Twitter, Reddit, Pinterest, Snapchat, Vimeo, Dailymotion,
-            // Twitch, Rutube, SoundCloud и т.д. — через Cobalt
-            lower.contains("twitter.com") || lower.contains("x.com") ||
-            lower.contains("reddit.com") || lower.contains("pinterest.com") ||
-            lower.contains("pin.it") || lower.contains("snapchat.com") ||
-            lower.contains("vimeo.com") || lower.contains("dailymotion.com") ||
-            lower.contains("twitch.tv") || lower.contains("rumble.com") ||
-            lower.contains("odysee.com") || lower.contains("soundcloud.com") ||
-            lower.contains("rutube.ru") || lower.contains("linkedin.com") ||
-            lower.contains("threads.net") || lower.contains("tumblr.com") -> resolveCobalt(url)
-
-            // Прямые ссылки на файлы
             lower.endsWith(".mp4") || lower.endsWith(".webm") ||
-            lower.endsWith(".mov") || lower.endsWith(".m4v") -> Resolved(url, null)
+            lower.endsWith(".mov") || lower.endsWith(".m4v") -> Resolved(videoUrl = url)
 
             else -> resolveCobalt(url)
         }
     }
 
     // =========================================================
-    // TikTok — через tikwm. ЛОГИКА НЕ ТРОНУТА.
+    // TikTok — через tikwm. Обрабатывает и видео, и фото-карусели.
     // =========================================================
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
@@ -156,23 +264,35 @@ class DownloadWorker(
         val data = obj.optJSONObject("data")
             ?: throw Exception("tikwm: нет поля data")
 
+        val cover = data.optString("cover").ifBlank { null }
+
+        // Проверяем, есть ли картинки (фото-карусель)
+        val imagesArr = data.optJSONArray("images")
+        if (imagesArr != null && imagesArr.length() > 0) {
+            val images = mutableListOf<String>()
+            for (i in 0 until imagesArr.length()) {
+                val img = imagesArr.optString(i, "")
+                if (img.isNotBlank()) images.add(img)
+            }
+            if (images.isNotEmpty()) {
+                Log.d(TAG, "TikTok фото-карусель: ${images.size} фото")
+                return Resolved(imageUrls = images, thumbnail = cover)
+            }
+        }
+
+        // Обычное видео
         val video = data.optString("play").ifBlank { null }
             ?: data.optString("hdplay").ifBlank { null }
-            ?: throw Exception("tikwm: нет ссылки на видео")
+            ?: throw Exception("tikwm: нет ни видео, ни картинок")
 
-        val cover = data.optString("cover").ifBlank { null }
-        Log.d(TAG, "TikTok OK")
-        return Resolved(video, cover)
+        Log.d(TAG, "TikTok OK (видео)")
+        return Resolved(videoUrl = video, thumbnail = cover)
     }
 
-    // =========================================================
-    // YouTube, Instagram, VK, Facebook — через yt-dlp
-    // =========================================================
     private fun resolveViaYtdlp(url: String): Resolved? {
         val body = """{"url":"$url"}"""
         val response = httpPostJson(YTDLP_URL, body, timeoutMs = 60_000)
             ?: throw Exception("yt-dlp сервер не ответил")
-
         val obj = JSONObject(response)
         if (obj.has("detail")) {
             val detail = obj.optString("detail")
@@ -181,20 +301,16 @@ class DownloadWorker(
                 throw Exception("YouTube требует авторизацию. См. Настройки → YouTube")
             }
             if (detail.contains("login", ignoreCase = true)) {
-                throw Exception("Требуется авторизация. См. Настройки")
+                throw Exception("Instagram требует авторизацию. См. Настройки → Instagram")
             }
             throw Exception("yt-dlp: " + detail.take(150))
         }
         val video = obj.optString("video_url").ifBlank { null }
             ?: throw Exception("yt-dlp: нет ссылки")
         val thumb = obj.optString("thumbnail").ifBlank { null }
-        Log.d(TAG, "yt-dlp OK")
-        return Resolved(video, thumb)
+        return Resolved(videoUrl = video, thumbnail = thumb)
     }
 
-    // =========================================================
-    // Cobalt — для остальных сервисов
-    // =========================================================
     private fun resolveCobalt(url: String): Resolved? {
         val instances = listOf(
             "https://cobalt-api.kwiatekmiki.com/",
@@ -209,13 +325,10 @@ class DownloadWorker(
 
         for (base in instances) {
             try {
-                Log.d(TAG, "Cobalt: пробую $base")
                 val response = httpPostJson(base, body, timeoutMs = 15_000) ?: continue
                 val obj = JSONObject(response)
                 if (obj.optString("status") == "error") {
-                    val err = obj.optJSONObject("error")
-                    lastError = err?.optString("code") ?: "unknown"
-                    Log.w(TAG, "Cobalt $base: $lastError")
+                    lastError = obj.optJSONObject("error")?.optString("code") ?: "unknown"
                     continue
                 }
                 val video = obj.optString("url").ifBlank {
@@ -224,21 +337,15 @@ class DownloadWorker(
                         picker.getJSONObject(0).optString("url", "")
                     else ""
                 }.ifBlank { null } ?: continue
-
                 val thumb = obj.optString("thumbnail").ifBlank { null }
-                Log.d(TAG, "Cobalt OK через $base")
-                return Resolved(video, thumb)
+                return Resolved(videoUrl = video, thumbnail = thumb)
             } catch (e: Exception) {
                 lastError = e.message ?: "unknown"
-                Log.w(TAG, "Cobalt $base: $lastError")
             }
         }
         throw Exception("Cobalt: $lastError")
     }
 
-    // =========================================================
-    // HTTP
-    // =========================================================
     private fun httpGetString(apiUrl: String, timeoutMs: Int = 20_000): String? {
         val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
