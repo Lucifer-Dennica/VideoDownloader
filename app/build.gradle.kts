@@ -13,7 +13,7 @@ android {
         applicationId = "com.example.videodownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 11
+        versionCode = 12
         versionName = "1.6.2"
         vectorDrawables { useSupportLibrary = true }
     }
