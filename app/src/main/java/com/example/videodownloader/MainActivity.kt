@@ -49,16 +49,13 @@ class MainActivity : ComponentActivity() {
 
     private var needsMediaPermission = mutableStateOf(false)
 
-    // Запрос уведомлений — отдельный
     private val notifPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         Log.d(TAG, "Уведомления: granted=$granted")
-        // ПОСЛЕ ответа на уведомления — запрашиваем медиа
         requestMediaPermissions()
     }
 
-    // Запрос медиа (может быть несколько сразу)
     private val mediaPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -68,11 +65,8 @@ class MainActivity : ComponentActivity() {
         val allGranted = result.values.all { it }
         needsMediaPermission.value = !allGranted
 
-        // Если хотя бы одно разрешение отклонено — проверяем, не надо ли показать диалог
         if (!allGranted) {
-            // Проверяем, "окончательно" ли отказано (после 2 отказов система не покажет диалог)
             if (!shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_VIDEO)) {
-                // Пользователь отказал навсегда — предлагаем настройки
                 needsMediaPermission.value = true
             }
         }
@@ -81,16 +75,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Шаг 1: сначала уведомления (если Android 13+)
-        // Шаг 2: в колбэке notifPermission → вызовется requestMediaPermissions()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            // Android < 13 — уведомления не требуют разрешения
             requestMediaPermissions()
         }
 
-        // Проверка обновлений
         CoroutineScope(Dispatchers.IO).launch {
             val update = UpdateChecker.checkForUpdate()
             if (update != null) {
@@ -138,13 +128,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Запрашивает разрешения на чтение медиа, если они ещё не выданы. */
     private fun requestMediaPermissions() {
         val permissions = buildList {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.READ_MEDIA_VIDEO)
                 add(Manifest.permission.READ_MEDIA_IMAGES)
-                // Android 14+ — частичный доступ к медиа
                 if (Build.VERSION.SDK_INT >= 34) {
                     add("android.permission.READ_MEDIA_VISUAL_USER_SELECTED")
                 }
@@ -153,7 +141,6 @@ class MainActivity : ComponentActivity() {
             }
         }.toTypedArray()
 
-        // Проверяем, что ещё не выданы
         val notGranted = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
@@ -210,8 +197,19 @@ private fun VideoDownloaderRoot(
             modifier = Modifier.padding(pad).fillMaxSize()
         ) { page ->
             when (page) {
-                0 -> HomeScreen(sharedLink, active, vm::enqueue, vm::delete)
-                1 -> DownloadsScreen(completed, vm::delete, vm::rescanFolder)
+                0 -> HomeScreen(
+                    initialLink = sharedLink,
+                    activeItems = active,
+                    onDownloadVideo = { vm.enqueue(it, audio = false) },
+                    onDownloadAudio = { vm.enqueue(it, audio = true) },
+                    onDelete = vm::delete
+                )
+                1 -> DownloadsScreen(
+                    items = completed,
+                    onDelete = vm::delete,
+                    onDeleteMany = vm::deleteMany,
+                    onRescan = vm::rescanFolder
+                )
                 else -> SettingsScreen(onChooseFolder)
             }
         }
