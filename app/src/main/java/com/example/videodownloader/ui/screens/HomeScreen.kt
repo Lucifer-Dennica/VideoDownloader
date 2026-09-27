@@ -1,5 +1,7 @@
 package com.example.videodownloader.ui.screens
 
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -7,20 +9,63 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.videodownloader.data.local.DownloadEntity
+import com.example.videodownloader.data.settings.SettingsRepository
 import com.example.videodownloader.ui.components.LinkInputField
 import com.example.videodownloader.util.UrlParser
+import kotlinx.coroutines.delay
 
 @Composable
 fun HomeScreen(
     initialLink: String,
     activeItems: List<DownloadEntity>,
-    onDownload: (String) -> Unit,
+    onDownloadVideo: (String) -> Unit,
+    onDownloadAudio: (String) -> Unit,
     onDelete: (DownloadEntity) -> Unit
 ) {
+    val context = LocalContext.current
+    val settings = remember { SettingsRepository(context) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     var link by remember(initialLink) { mutableStateOf(initialLink) }
     val parsed = UrlParser.parse(link)
+
+    val autoPaste by settings.autoPaste.collectAsState(initial = false)
+    val autoDownload by settings.autoDownload.collectAsState(initial = false)
+    val audioOnly by settings.audioOnly.collectAsState(initial = false)
+
+    // ---- Автопаста из буфера при возврате в приложение ----
+    DisposableEffect(lifecycleOwner, autoPaste) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && autoPaste && link.isBlank()) {
+                val clip = try {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
+                } catch (_: Exception) { null }
+
+                if (!clip.isNullOrBlank() && UrlParser.parse(clip) != null) {
+                    link = clip
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // ---- Автоскачивание с дебаунсом 800 мс ----
+    LaunchedEffect(link, autoDownload, audioOnly) {
+        if (!autoDownload || audioOnly) return@LaunchedEffect
+        if (link.isBlank()) return@LaunchedEffect
+        if (UrlParser.parse(link) == null) return@LaunchedEffect
+        delay(800)
+        onDownloadVideo(link)
+        link = ""
+    }
 
     Column(
         Modifier.fillMaxSize().padding(20.dp),
@@ -35,11 +80,30 @@ fun HomeScreen(
             AssistChip(onClick = {}, label = { Text("Источник: ${parsed.service}") })
         }
 
-        Button(
-            onClick = { onDownload(link); link = "" },
-            enabled = parsed != null && link.isNotBlank(),
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Скачать") }
+        // ---- Кнопки скачивания ----
+        if (audioOnly) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { onDownloadVideo(link); link = "" },
+                    enabled = parsed != null && link.isNotBlank(),
+                    modifier = Modifier.weight(1f)
+                ) { Text("🎬 Скачать") }
+                OutlinedButton(
+                    onClick = { onDownloadAudio(link); link = "" },
+                    enabled = parsed != null && link.isNotBlank(),
+                    modifier = Modifier.weight(1f)
+                ) { Text("🎵 Аудио") }
+            }
+        } else {
+            Button(
+                onClick = { onDownloadVideo(link); link = "" },
+                enabled = parsed != null && link.isNotBlank(),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("🎬 Скачать") }
+        }
 
         Text(
             "Скачивайте только те материалы, на которые у вас есть права.",
