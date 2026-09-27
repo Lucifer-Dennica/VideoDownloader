@@ -62,21 +62,21 @@ jobs:
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-v1.5.1
-          path: release/VideoDownloader-v1.5.1.apk
+          name: VideoDownloader-v1.5.2
+          path: release/VideoDownloader-v1.5.2.apk
           if-no-files-found: error
 
       - name: Attach APK to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/VideoDownloader-v1.5.1.apk
+          files: release/VideoDownloader-v1.5.2.apk
           tag_name: ${{ github.event.release.tag_name }}
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Исправлены разрешения
-            - Улучшено сканирование папок
-            - Определение сервиса для старых файлов
+            - Разрешение на чтение изображений
+            - Превью видео из первого кадра
+            - Отображение локальных превью
           draft: false
           prerelease: false
