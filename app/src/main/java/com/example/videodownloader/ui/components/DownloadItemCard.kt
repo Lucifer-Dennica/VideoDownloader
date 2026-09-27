@@ -47,6 +47,8 @@ fun DownloadItemCard(
         SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.createdAt))
     }
 
+    val isCarousel = item.type == "PHOTOS"
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -62,26 +64,46 @@ fun DownloadItemCard(
             Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (item.thumbnailUrl != null) {
-                AsyncImage(
-                    model = item.thumbnailUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .width(100.dp)
-                        .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(8.dp)),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .width(100.dp)
-                        .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surface),
-                    contentAlignment = Alignment.Center
+            // Обложка с бейджем типа
+            Box {
+                if (item.thumbnailUrl != null) {
+                    AsyncImage(
+                        model = item.thumbnailUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .width(100.dp)
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .width(100.dp)
+                            .aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (isCarousel) "🖼" else "🎬",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
+                }
+
+                // Бейдж с типом контента
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(topStart = 0.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 0.dp),
+                    modifier = Modifier.align(Alignment.BottomEnd)
                 ) {
-                    Text("🎬", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        if (isCarousel) "${item.itemCount} 🖼" else "🎬",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
                 }
             }
 
@@ -115,7 +137,7 @@ fun DownloadItemCard(
                 val statusText = when (item.status) {
                     "QUEUED" -> "⏳ В очереди"
                     "DOWNLOADING" -> "⬇️ ${item.progress}%"
-                    "COMPLETED" -> "✅ Готово"
+                    "COMPLETED" -> if (isCarousel) "✅ Готово (${item.itemCount} фото)" else "✅ Готово"
                     "ERROR" -> "❌ Ошибка"
                     else -> item.status
                 }
