@@ -2,5 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-files-path name="videos" path="Movies/VideoDownloader/" />
     <external-path name="dcim" path="DCIM/VideoDownloader/" />
+    <external-path name="music" path="Music/VideoDownloader/" />
     <cache-path name="cache" path="." />
 </paths>
