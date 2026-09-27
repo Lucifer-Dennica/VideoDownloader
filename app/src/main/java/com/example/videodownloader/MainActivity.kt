@@ -48,35 +48,42 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
-    // Флаги для диалога
     private var needsMediaPermission = mutableStateOf(false)
 
-    private val mediaPermission = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        // Обновляем флаг — если отказ, показать диалог
-        needsMediaPermission.value = !granted
+    // Запрос сразу НЕСКОЛЬКИХ разрешений
+    private val mediaPermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        // Если хотя бы одно отклонено — показать диалог
+        val allGranted = result.values.all { it }
+        needsMediaPermission.value = !allGranted
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val mediaPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.READ_MEDIA_VIDEO
-        } else {
-            Manifest.permission.READ_EXTERNAL_STORAGE
-        }
-
-        // Проверяем, выдано ли разрешение
-        val isGranted = ContextCompat.checkSelfPermission(this, mediaPerm) ==
-                PackageManager.PERMISSION_GRANTED
-
+        // Уведомления
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        if (!isGranted) {
-            mediaPermission.launch(mediaPerm)
+        // Список нужных разрешений на медиа
+        val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_IMAGES
+            )
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+        // Проверяем, все ли выданы
+        val allGranted = permissionsToRequest.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+
+        if (!allGranted) {
+            mediaPermissions.launch(permissionsToRequest)
         }
 
         // Проверка обновлений в фоне
@@ -95,16 +102,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VideoDownloaderTheme {
-                val showDialog = needsMediaPermission.value
-
-                if (showDialog) {
+                if (needsMediaPermission.value) {
                     AlertDialog(
                         onDismissRequest = { needsMediaPermission.value = false },
                         title = { Text("Нужно разрешение") },
                         text = {
                             Text(
-                                "Чтобы приложение видело скачанные видео, " +
-                                "разрешите доступ к фото и видео в настройках."
+                                "Чтобы приложение видело скачанные видео и фото, " +
+                                "разрешите доступ к файлам в настройках."
                             )
                         },
                         confirmButton = {
@@ -157,9 +162,7 @@ private fun VideoDownloaderRoot(
                     NavigationBarItem(
                         selected = pagerState.currentPage == i,
                         onClick = {
-                            scope.launch {
-                                pagerState.animateScrollToPage(i)
-                            }
+                            scope.launch { pagerState.animateScrollToPage(i) }
                         },
                         icon = { Icon(tab.icon, contentDescription = tab.label) },
                         label = { Text(tab.label) }
