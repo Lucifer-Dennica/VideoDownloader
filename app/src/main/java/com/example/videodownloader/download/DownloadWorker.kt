@@ -55,7 +55,6 @@ class DownloadWorker(
             }
 
             if (resolved.imageUrls.isNotEmpty()) {
-                // ============ ФОТО-КАРУСЕЛЬ ============
                 Log.d(TAG, "Это фото-карусель: ${resolved.imageUrls.size} фото")
                 val result = downloadPhotoCarousel(resolved.imageUrls, id, service, repository)
 
@@ -74,7 +73,6 @@ class DownloadWorker(
                 cancelNotificationDelayed(id)
                 Result.success(workDataOf(KEY_FILE to (result.firstUri ?: "")))
             } else {
-                // ============ ВИДЕО или АУДИО ============
                 val mediaUrl = resolved.videoUrl
                     ?: throw Exception("Пустой ответ от сервера")
 
@@ -234,7 +232,6 @@ class DownloadWorker(
     ): Resolved? {
         val lower = url.lowercase()
 
-        // Режим «только аудио»: прямые ссылки не поддерживаются, всё остальное — через Cobalt
         if (audioOnly) {
             if (lower.endsWith(".mp4") || lower.endsWith(".webm") ||
                 lower.endsWith(".mov") || lower.endsWith(".m4v")) {
@@ -265,9 +262,6 @@ class DownloadWorker(
         }
     }
 
-    // =========================================================
-    // TikTok — через tikwm. Учитывает качество (hd=1/0).
-    // =========================================================
     private fun resolveTikTok(url: String, quality: VideoQuality): Resolved? {
         val hd = quality.tikwmHd
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=$hd"
@@ -330,6 +324,10 @@ class DownloadWorker(
         return Resolved(videoUrl = video, thumbnail = thumb)
     }
 
+    /**
+     * Cobalt — новый API (downloadMode) с fallback на старый (isAudioOnly).
+     * Если все инстансы отдали invalid_body — кидаем ошибку.
+     */
     private fun resolveCobalt(
         url: String,
         quality: VideoQuality,
@@ -343,34 +341,56 @@ class DownloadWorker(
             "https://api.cobalt.best/",
             COBALT_URL
         )
-        val body = if (audioOnly) {
-            """{"url":"$url","audioOnly":true,"audioFormat":"mp3"}"""
+
+        // Два возможных формата запроса
+        val bodies = if (audioOnly) {
+            listOf(
+                // Новый Cobalt API (v10+)
+                """{"url":"$url","downloadMode":"audio","audioFormat":"mp3"}""",
+                // Старый Cobalt API (v7-v9)
+                """{"url":"$url","isAudioOnly":true,"aFormat":"mp3"}"""
+            )
         } else {
-            """{"url":"$url","videoQuality":"${quality.cobaltValue}"}"""
+            listOf(
+                """{"url":"$url","videoQuality":"${quality.cobaltValue}"}""",
+                """{"url":"$url","vQuality":"${quality.cobaltValue}"}"""
+            )
         }
+
         var lastError = "Нет инстансов"
 
         for (base in instances) {
-            try {
-                val response = httpPostJson(base, body, timeoutMs = 15_000) ?: continue
-                val obj = JSONObject(response)
-                if (obj.optString("status") == "error") {
-                    lastError = obj.optJSONObject("error")?.optString("code") ?: "unknown"
-                    continue
+            for (body in bodies) {
+                try {
+                    val response = httpPostJson(base, body, timeoutMs = 15_000) ?: continue
+                    val obj = JSONObject(response)
+                    val status = obj.optString("status")
+                    if (status == "error") {
+                        val code = obj.optJSONObject("error")?.optString("code") ?: "unknown"
+                        lastError = "Cobalt: $code"
+                        Log.w(TAG, "Cobalt $base отдал $code, пробуем другой формат")
+                        continue
+                    }
+                    if (status != "tunnel" && status != "redirect" && status != "stream") {
+                        lastError = "Cobalt: неожиданный статус $status"
+                        continue
+                    }
+                    val media = obj.optString("url").ifBlank {
+                        val picker = obj.optJSONArray("picker")
+                        if (picker != null && picker.length() > 0)
+                            picker.getJSONObject(0).optString("url", "")
+                        else ""
+                    }.ifBlank { null } ?: continue
+                    val thumb = obj.optString("thumbnail").ifBlank { null }
+                    Log.d(TAG, "Cobalt OK через $base")
+                    return Resolved(videoUrl = media, thumbnail = thumb)
+                } catch (e: Exception) {
+                    lastError = e.message ?: "unknown"
+                    Log.w(TAG, "Cobalt $base ошибка: ${e.message}")
                 }
-                val media = obj.optString("url").ifBlank {
-                    val picker = obj.optJSONArray("picker")
-                    if (picker != null && picker.length() > 0)
-                        picker.getJSONObject(0).optString("url", "")
-                    else ""
-                }.ifBlank { null } ?: continue
-                val thumb = obj.optString("thumbnail").ifBlank { null }
-                return Resolved(videoUrl = media, thumbnail = thumb)
-            } catch (e: Exception) {
-                lastError = e.message ?: "unknown"
             }
         }
-        throw Exception("Cobalt: $lastError")
+        throw Exception(lastError)
     }
 
     private fun httpGetString(apiUrl: String, timeoutMs: Int = 20_000): String? {
@@ -401,11 +421,13 @@ class DownloadWorker(
         return try {
             conn.outputStream.use { it.write(body.toByteArray()) }
             val code = conn.responseCode
-            if (code !in 200..299) {
-                val errText = conn.errorStream?.bufferedReader()?.readText().orEmpty()
-                throw Exception("HTTP $code: ${errText.take(200)}")
+            val text = if (code in 200..299) {
+                conn.inputStream.bufferedReader().readText()
+            } else {
+                conn.errorStream?.bufferedReader()?.readText().orEmpty()
             }
-            conn.inputStream.bufferedReader().readText()
+            // Cobalt отдаёт JSON и при 400 — не кидаем исключение, парсим тело
+            text.ifBlank { throw Exception("HTTP $code") }
         } finally { conn.disconnect() }
     }
 
@@ -483,7 +505,6 @@ class DownloadWorker(
         }
     }
 
-    /** Сохраняет аудио в DCIM/VideoDownloader/{service}/Audio/ как .mp3 */
     private fun saveAudioToPublicDcim(tempFile: File, fileName: String, service: String): String {
         val relativePath = Environment.DIRECTORY_DCIM + "/VideoDownloader/" + service + "/Audio/"
 
