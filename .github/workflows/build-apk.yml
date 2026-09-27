@@ -54,10 +54,11 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
+      # ⚠️ ВАЖНО: здесь должно быть то же имя, что ниже
       - name: Rename APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/VideoDownloader-v1.5.1.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release/VideoDownloader-v1.5.2.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
@@ -75,8 +76,8 @@ jobs:
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Разрешение на чтение изображений
             - Превью видео из первого кадра
+            - Разрешение на чтение фото
             - Отображение локальных превью
           draft: false
           prerelease: false
