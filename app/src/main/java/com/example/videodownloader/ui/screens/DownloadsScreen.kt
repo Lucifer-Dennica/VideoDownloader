@@ -100,12 +100,13 @@ private fun openItem(context: android.content.Context, item: DownloadEntity) {
 
 private fun openFolder(context: android.content.Context, item: DownloadEntity) {
     val service = detectService(item)
-    val path = when {
-        item.type == "PHOTOS" && item.folderPath != null -> item.folderPath
-        else -> "DCIM/VideoDownloader/$service"
+    val path = if (item.type == "PHOTOS" && !item.folderPath.isNullOrBlank()) {
+        item.folderPath
+    } else {
+        "DCIM/VideoDownloader/$service"
     }
 
-    // Способ 1: file:// (старые файловые менеджеры)
+    // Способ 1: file://
     try {
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(
@@ -137,9 +138,13 @@ private fun openFolder(context: android.content.Context, item: DownloadEntity) {
 }
 
 private fun detectService(item: DownloadEntity): String {
+    // Если url начинается с "local://" — сервис уже внутри
+    if (item.url.startsWith("local://")) {
+        return item.url.removePrefix("local://")
+    }
     val url = item.url.lowercase()
     val title = item.title.lowercase()
-    val path = (item.filePath ?: "").lowercase()
+    val path = (item.folderPath ?: item.filePath ?: "").lowercase()
     return when {
         url.contains("tiktok") || title.contains("tiktok") || path.contains("tiktok") -> "TikTok"
         url.contains("youtube") || url.contains("youtu.be") ||
