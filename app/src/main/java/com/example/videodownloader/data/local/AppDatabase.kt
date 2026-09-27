@@ -25,7 +25,7 @@ interface DownloadDao {
     suspend fun delete(item: DownloadEntity)
 }
 
-@Database(entities = [DownloadEntity::class], version = 2, exportSchema = false)
+@Database(entities = [DownloadEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun downloads(): DownloadDao
 
