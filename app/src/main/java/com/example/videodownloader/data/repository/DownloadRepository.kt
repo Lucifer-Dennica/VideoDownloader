@@ -2,12 +2,18 @@ package com.example.videodownloader.data.repository
 
 import android.content.ContentUris
 import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import com.example.videodownloader.data.local.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 class DownloadRepository(context: Context) {
 
@@ -23,10 +29,8 @@ class DownloadRepository(context: Context) {
     suspend fun update(item: DownloadEntity) = dao.update(item)
     suspend fun delete(item: DownloadEntity) = dao.delete(item)
 
-    /** Сканирует папку DCIM/VideoDownloader. Группирует фото по папкам-альбомам. */
     suspend fun scanFolder() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
-
         scanVideos()
         scanPhotos()
     }
@@ -59,7 +63,6 @@ class DownloadRepository(context: Context) {
                     val dateSec = cursor.getLong(dateCol)
                     val relativePath = cursor.getString(pathCol) ?: ""
 
-                    // Пропускаем фото из папок Photos/ — они обрабатываются отдельно
                     if (relativePath.contains("/Photos/")) continue
 
                     val uri = ContentUris.withAppendedId(
@@ -71,11 +74,15 @@ class DownloadRepository(context: Context) {
 
                     val service = detectServiceFromPath(relativePath)
 
+                    // Генерируем превью из видео
+                    val thumbPath = generateThumbnail(mediaId, name)
+
                     dao.insert(
                         DownloadEntity(
                             url = "local://$service",
                             title = "Видео • $service",
                             filePath = uriStr,
+                            thumbnailUrl = thumbPath,
                             type = "VIDEO",
                             itemCount = 1,
                             status = "COMPLETED",
@@ -91,7 +98,37 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    // ---------- ФОТО (группировка по альбомам) ----------
+    /** Извлекает первый кадр видео и сохраняет как JPEG. Возвращает путь к файлу или null. */
+    private suspend fun generateThumbnail(mediaId: Long, name: String): String? =
+        withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                val uri = ContentUris.withAppendedId(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId
+                )
+                retriever.setDataSource(appContext, uri)
+                val bitmap = retriever.getFrameAtTime(
+                    1_000_000, // 1 секунда — обычно уже не чёрный кадр
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                ) ?: return@withContext null
+
+                // Сохраняем в кэш приложения
+                val thumbsDir = File(appContext.cacheDir, "thumbs").apply { mkdirs() }
+                val thumbFile = File(thumbsDir, "thumb_${mediaId}.jpg")
+                FileOutputStream(thumbFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                }
+                bitmap.recycle()
+                thumbFile.absolutePath
+            } catch (e: Exception) {
+                Log.w(TAG, "generateThumbnail failed for $name: ${e.message}")
+                null
+            } finally {
+                try { retriever.release() } catch (_: Exception) {}
+            }
+        }
+
+    // ---------- ФОТО ----------
     private suspend fun scanPhotos() {
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
@@ -101,7 +138,6 @@ class DownloadRepository(context: Context) {
         val selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
         val selectionArgs = arrayOf("%DCIM/VideoDownloader%")
 
-        // Группируем по папке: folderPath -> список (uri, dateAdded)
         val albums = mutableMapOf<String, MutableList<Pair<String, Long>>>()
 
         try {
@@ -132,11 +168,8 @@ class DownloadRepository(context: Context) {
             return
         }
 
-        // Создаём ОДНУ запись на альбом (папку)
         for ((folder, photos) in albums) {
             if (photos.isEmpty()) continue
-
-            // Если запись для этой папки уже есть — пропускаем
             if (dao.getByFolderPath(folder) != null) continue
 
             val firstUri = photos.first().first
@@ -148,6 +181,7 @@ class DownloadRepository(context: Context) {
                     url = "local://$service",
                     title = "Фото • $service",
                     filePath = firstUri,
+                    thumbnailUrl = firstUri, // для фото используем сам файл как превью
                     folderPath = folder,
                     type = "PHOTOS",
                     itemCount = photos.size,
@@ -156,7 +190,7 @@ class DownloadRepository(context: Context) {
                     createdAt = newestDate * 1000
                 )
             )
-            Log.d(TAG, "scanPhotos: $folder → $service (${photos.size} фото)")
+            Log.d(TAG, "scanPhotos: $folder → $service (${photos.size})")
         }
     }
 
