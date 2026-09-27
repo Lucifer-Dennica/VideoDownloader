@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.videodownloader.data.local.DownloadEntity
 import java.io.File
 import java.text.SimpleDateFormat
@@ -64,11 +65,24 @@ fun DownloadItemCard(
             Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Обложка с бейджем типа
             Box {
                 if (item.thumbnailUrl != null) {
+                    // Формируем правильную модель для Coil:
+                    // - content:// → строка (работает)
+                    // - http(s):// → строка (работает)
+                    // - локальный путь → File (обязательно!)
+                    val model: Any = when {
+                        item.thumbnailUrl.startsWith("content://") -> item.thumbnailUrl
+                        item.thumbnailUrl.startsWith("http") -> item.thumbnailUrl
+                        item.thumbnailUrl.startsWith("/") -> File(item.thumbnailUrl)
+                        else -> item.thumbnailUrl
+                    }
+
                     AsyncImage(
-                        model = item.thumbnailUrl,
+                        model = ImageRequest.Builder(context)
+                            .data(model)
+                            .crossfade(true)
+                            .build(),
                         contentDescription = null,
                         modifier = Modifier
                             .width(100.dp)
@@ -92,7 +106,7 @@ fun DownloadItemCard(
                     }
                 }
 
-                // Бейдж с типом контента
+                // Бейдж типа
                 Surface(
                     color = MaterialTheme.colorScheme.primary,
                     shape = RoundedCornerShape(topStart = 0.dp, topEnd = 8.dp, bottomStart = 8.dp, bottomEnd = 0.dp),
