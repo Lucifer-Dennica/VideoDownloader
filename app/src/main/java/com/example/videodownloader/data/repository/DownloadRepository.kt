@@ -29,9 +29,59 @@ class DownloadRepository(context: Context) {
     suspend fun update(item: DownloadEntity) = dao.update(item)
     suspend fun delete(item: DownloadEntity) = dao.delete(item)
 
+    /** Удаляет запись + сам файл(ы) из памяти. */
+    suspend fun deleteWithFile(item: DownloadEntity) = withContext(Dispatchers.IO) {
+        try {
+            if (item.type == "PHOTOS" && !item.folderPath.isNullOrBlank()) {
+                deletePhotosInFolder(item.folderPath)
+            } else {
+                item.filePath?.let { deleteMediaByPath(it) }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "deleteWithFile file error: ${e.message}")
+        }
+        dao.delete(item)
+    }
+
+    private fun deleteMediaByPath(path: String) {
+        if (path.startsWith("content://")) {
+            try {
+                appContext.contentResolver.delete(Uri.parse(path), null, null)
+            } catch (e: Exception) {
+                Log.w(TAG, "contentResolver.delete failed: ${e.message}")
+            }
+        } else {
+            File(path).takeIf { it.exists() }?.delete()
+        }
+    }
+
+    private fun deletePhotosInFolder(folderRelativePath: String) {
+        val normalized = folderRelativePath.trimEnd('/') + "/"
+        val projection = arrayOf(MediaStore.Images.Media._ID)
+        val selection = "${MediaStore.Images.Media.RELATIVE_PATH} = ?"
+        try {
+            appContext.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection, selection, arrayOf(normalized), null
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val uri = ContentUris.withAppendedId(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id
+                    )
+                    try { appContext.contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "deletePhotosInFolder failed: ${e.message}")
+        }
+    }
+
     suspend fun scanFolder() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         scanVideos()
+        scanAudio()
         scanPhotos()
     }
 
@@ -73,8 +123,6 @@ class DownloadRepository(context: Context) {
                     if (dao.getByPath(uriStr) != null) continue
 
                     val service = detectServiceFromPath(relativePath)
-
-                    // Генерируем превью из видео
                     val thumbPath = generateThumbnail(mediaId, name)
 
                     dao.insert(
@@ -98,7 +146,66 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    /** Извлекает первый кадр видео и сохраняет как JPEG. Возвращает путь к файлу или null. */
+    // ---------- АУДИО ----------
+    private suspend fun scanAudio() {
+        val projection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.RELATIVE_PATH
+        )
+        val selection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
+        val selectionArgs = arrayOf("%DCIM/VideoDownloader%")
+
+        try {
+            appContext.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection, selection, selectionArgs,
+                "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.RELATIVE_PATH)
+
+                while (cursor.moveToNext()) {
+                    val mediaId = cursor.getLong(idCol)
+                    val dateSec = cursor.getLong(dateCol)
+                    val relativePath = cursor.getString(pathCol) ?: ""
+
+                    if (!relativePath.contains("/Audio/")) continue
+
+                    val uri = ContentUris.withAppendedId(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, mediaId
+                    )
+                    val uriStr = uri.toString()
+
+                    if (dao.getByPath(uriStr) != null) continue
+
+                    val service = detectServiceFromPath(relativePath)
+                    val folderPath = relativePath.trimEnd('/')
+
+                    dao.insert(
+                        DownloadEntity(
+                            url = "local://$service",
+                            title = "Аудио • $service",
+                            filePath = uriStr,
+                            thumbnailUrl = null,
+                            folderPath = folderPath,
+                            type = "AUDIO",
+                            itemCount = 1,
+                            status = "COMPLETED",
+                            progress = 100,
+                            createdAt = dateSec * 1000
+                        )
+                    )
+                    Log.d(TAG, "scanAudio: $relativePath → $service")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "scanAudio error: ${e.message}")
+        }
+    }
+
     private suspend fun generateThumbnail(mediaId: Long, name: String): String? =
         withContext(Dispatchers.IO) {
             val retriever = MediaMetadataRetriever()
@@ -108,11 +215,10 @@ class DownloadRepository(context: Context) {
                 )
                 retriever.setDataSource(appContext, uri)
                 val bitmap = retriever.getFrameAtTime(
-                    1_000_000, // 1 секунда — обычно уже не чёрный кадр
+                    1_000_000,
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC
                 ) ?: return@withContext null
 
-                // Сохраняем в кэш приложения
                 val thumbsDir = File(appContext.cacheDir, "thumbs").apply { mkdirs() }
                 val thumbFile = File(thumbsDir, "thumb_${mediaId}.jpg")
                 FileOutputStream(thumbFile).use { out ->
@@ -181,7 +287,7 @@ class DownloadRepository(context: Context) {
                     url = "local://$service",
                     title = "Фото • $service",
                     filePath = firstUri,
-                    thumbnailUrl = firstUri, // для фото используем сам файл как превью
+                    thumbnailUrl = firstUri,
                     folderPath = folder,
                     type = "PHOTOS",
                     itemCount = photos.size,
