@@ -58,7 +58,7 @@ object ShareUtil {
         else -> "video/*"
     }
 
-    /** Определяет общий MIME: если все одинаковые — берём его, иначе */*. */
+    /** Общий MIME: если все типы совпадают — берём его, иначе любое. */
     private fun commonMimeOf(items: List<DownloadEntity>): String {
         val types = items.map { it.type }.toSet()
         return when {
