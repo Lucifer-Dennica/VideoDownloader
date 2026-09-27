@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +34,8 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
+    private val TAG = "MainActivity"
+
     private val folderPicker = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -44,49 +47,50 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val notifPermission = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { }
-
     private var needsMediaPermission = mutableStateOf(false)
 
-    // Запрос сразу НЕСКОЛЬКИХ разрешений
+    // Запрос уведомлений — отдельный
+    private val notifPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        Log.d(TAG, "Уведомления: granted=$granted")
+        // ПОСЛЕ ответа на уведомления — запрашиваем медиа
+        requestMediaPermissions()
+    }
+
+    // Запрос медиа (может быть несколько сразу)
     private val mediaPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        // Если хотя бы одно отклонено — показать диалог
+        result.forEach { (perm, granted) ->
+            Log.d(TAG, "Медиа $perm: granted=$granted")
+        }
         val allGranted = result.values.all { it }
         needsMediaPermission.value = !allGranted
+
+        // Если хотя бы одно разрешение отклонено — проверяем, не надо ли показать диалог
+        if (!allGranted) {
+            // Проверяем, "окончательно" ли отказано (после 2 отказов система не покажет диалог)
+            if (!shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_VIDEO)) {
+                // Пользователь отказал навсегда — предлагаем настройки
+                needsMediaPermission.value = true
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Уведомления
+        // Шаг 1: сначала уведомления (если Android 13+)
+        // Шаг 2: в колбэке notifPermission → вызовется requestMediaPermissions()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-
-        // Список нужных разрешений на медиа
-        val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(
-                Manifest.permission.READ_MEDIA_VIDEO,
-                Manifest.permission.READ_MEDIA_IMAGES
-            )
         } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            // Android < 13 — уведомления не требуют разрешения
+            requestMediaPermissions()
         }
 
-        // Проверяем, все ли выданы
-        val allGranted = permissionsToRequest.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
-
-        if (!allGranted) {
-            mediaPermissions.launch(permissionsToRequest)
-        }
-
-        // Проверка обновлений в фоне
+        // Проверка обновлений
         CoroutineScope(Dispatchers.IO).launch {
             val update = UpdateChecker.checkForUpdate()
             if (update != null) {
@@ -132,6 +136,36 @@ class MainActivity : ComponentActivity() {
                 VideoDownloaderRoot(shared, { folderPicker.launch(null) })
             }
         }
+    }
+
+    /** Запрашивает разрешения на чтение медиа, если они ещё не выданы. */
+    private fun requestMediaPermissions() {
+        val permissions = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.READ_MEDIA_VIDEO)
+                add(Manifest.permission.READ_MEDIA_IMAGES)
+                // Android 14+ — частичный доступ к медиа
+                if (Build.VERSION.SDK_INT >= 34) {
+                    add("android.permission.READ_MEDIA_VISUAL_USER_SELECTED")
+                }
+            } else {
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        }.toTypedArray()
+
+        // Проверяем, что ещё не выданы
+        val notGranted = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (notGranted.isEmpty()) {
+            Log.d(TAG, "Все разрешения уже выданы")
+            needsMediaPermission.value = false
+            return
+        }
+
+        Log.d(TAG, "Запрашиваем разрешения: ${notGranted.toList()}")
+        mediaPermissions.launch(notGranted.toTypedArray())
     }
 }
 
