@@ -48,15 +48,15 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    // Флаги для диалога
+    private var needsMediaPermission = mutableStateOf(false)
+
     private val mediaPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (!granted) {
-            showSettingsDialog = true
-        }
+        // Обновляем флаг — если отказ, показать диалог
+        needsMediaPermission.value = !granted
     }
-
-    private var showSettingsDialog = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
 
+        // Проверяем, выдано ли разрешение
         val isGranted = ContextCompat.checkSelfPermission(this, mediaPerm) ==
                 PackageManager.PERMISSION_GRANTED
 
@@ -94,9 +95,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VideoDownloaderTheme {
-                if (showSettingsDialog) {
+                val showDialog = needsMediaPermission.value
+
+                if (showDialog) {
                     AlertDialog(
-                        onDismissRequest = { showSettingsDialog = false },
+                        onDismissRequest = { needsMediaPermission.value = false },
                         title = { Text("Нужно разрешение") },
                         text = {
                             Text(
@@ -106,7 +109,7 @@ class MainActivity : ComponentActivity() {
                         },
                         confirmButton = {
                             TextButton(onClick = {
-                                showSettingsDialog = false
+                                needsMediaPermission.value = false
                                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                     data = Uri.fromParts("package", packageName, null)
                                 }
@@ -114,7 +117,7 @@ class MainActivity : ComponentActivity() {
                             }) { Text("Открыть настройки") }
                         },
                         dismissButton = {
-                            TextButton(onClick = { showSettingsDialog = false }) {
+                            TextButton(onClick = { needsMediaPermission.value = false }) {
                                 Text("Позже")
                             }
                         }
@@ -167,9 +170,7 @@ private fun VideoDownloaderRoot(
     ) { pad ->
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.padding(pad).fillMaxSize(),
-            // Свайпы только если на странице нет горизонтального скролла
-            userScrollEnabled = true
+            modifier = Modifier.padding(pad).fillMaxSize()
         ) { page ->
             when (page) {
                 0 -> HomeScreen(sharedLink, active, vm::enqueue, vm::delete)
