@@ -54,28 +54,32 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      # ⚠️ ВАЖНО: здесь должно быть то же имя, что ниже
       - name: Rename APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/VideoDownloader-v1.5.3.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release/VideoDownloader-v1.6.0.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-v1.5.3
-          path: release/VideoDownloader-v1.5.3.apk
+          name: VideoDownloader-v1.6.0
+          path: release/VideoDownloader-v1.6.0.apk
           if-no-files-found: error
 
       - name: Attach APK to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/VideoDownloader-v1.5.3.apk
+          files: release/VideoDownloader-v1.6.0.apk
           tag_name: ${{ github.event.release.tag_name }}
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Разрешение на чтение фото
+            - Выбор качества видео (до 360p)
+            - Автопаста из буфера
+            - Автоскачивание
+            - Режим «Только аудио» (mp3)
+            - Мультивыбор: поделиться/удалить
+            - Удаление файлов из памяти
           draft: false
           prerelease: false
