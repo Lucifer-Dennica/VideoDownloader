@@ -22,62 +22,88 @@ class DownloadRepository(context: Context) {
     suspend fun update(item: DownloadEntity) = dao.update(item)
     suspend fun delete(item: DownloadEntity) = dao.delete(item)
 
-    /**
-     * Сканирует все видео из DCIM/VideoDownloader/ (и все подпапки)
-     * и добавляет отсутствующие в базу.
-     */
+    /** Сканирует папку DCIM/VideoDownloader и добавляет все файлы в БД. */
     suspend fun scanFolder() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
 
+        // Сканируем ВИДЕО
+        scanMedia(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, isVideo = true)
+        // Сканируем ФОТО (для карусели)
+        scanMedia(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, isVideo = false)
+    }
+
+    private suspend fun scanMedia(collection: android.net.Uri, isVideo: Boolean) {
         val projection = arrayOf(
-            MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.DATE_ADDED,
-            MediaStore.Video.Media.RELATIVE_PATH
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.RELATIVE_PATH
         )
-        val selection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
+        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
         val selectionArgs = arrayOf("%DCIM/VideoDownloader%")
-        val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
+        val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
 
         try {
             appContext.contentResolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                sortOrder
+                collection, projection, selection, selectionArgs, sortOrder
             )?.use { cursor ->
-                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-                val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                val pathCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
 
                 while (cursor.moveToNext()) {
                     val mediaId = cursor.getLong(idCol)
-                    val name = cursor.getString(nameCol) ?: "video.mp4"
+                    val name = cursor.getString(nameCol) ?: "file"
                     val dateSec = cursor.getLong(dateCol)
-                    val uri = ContentUris.withAppendedId(
-                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                        mediaId
-                    )
+                    val relativePath = cursor.getString(pathCol) ?: ""
+
+                    val uri = ContentUris.withAppendedId(collection, mediaId)
                     val uriStr = uri.toString()
 
-                    if (dao.getByPath(uriStr) == null) {
-                        dao.insert(
-                            DownloadEntity(
-                                url = "",
-                                title = name,
-                                filePath = uriStr,
-                                status = "COMPLETED",
-                                progress = 100,
-                                createdAt = dateSec * 1000
-                            )
+                    if (dao.getByPath(uriStr) != null) continue
+
+                    // Определяем сервис из пути
+                    val service = detectServiceFromPath(relativePath)
+
+                    // Определяем тип: фото или видео
+                    val type = if (isVideo) "VIDEO" else "PHOTOS"
+
+                    dao.insert(
+                        DownloadEntity(
+                            url = "local://$service",         // псевдо-url для определения
+                            title = if (isVideo) "Видео • $service" else "Фото • $service",
+                            filePath = uriStr,
+                            type = type,
+                            itemCount = 1,
+                            status = "COMPLETED",
+                            progress = 100,
+                            createdAt = dateSec * 1000
                         )
-                        Log.d("DownloadRepository", "scanFolder: добавлен $name")
-                    }
+                    )
+                    Log.d("DownloadRepository", "scanFolder: $name → $service ($type)")
                 }
             }
         } catch (e: Exception) {
-            Log.e("DownloadRepository", "scanFolder error: ${e.message}")
+            Log.e("DownloadRepository", "scanMedia error: ${e.message}")
+        }
+    }
+
+    /** Из пути DCIM/VideoDownloader/TikTok/Photos/album_xxx/photo_1.jpg
+     *  вытаскиваем сервис (TikTok) */
+    private fun detectServiceFromPath(relativePath: String): String {
+        val lower = relativePath.lowercase()
+        return when {
+            lower.contains("/tiktok") -> "TikTok"
+            lower.contains("/youtube") -> "YouTube"
+            lower.contains("/instagram") -> "Instagram"
+            lower.contains("/facebook") -> "Facebook"
+            lower.contains("/vk") -> "VK"
+            lower.contains("/twitter") -> "Twitter"
+            lower.contains("/reddit") -> "Reddit"
+            lower.contains("/pinterest") -> "Pinterest"
+            lower.contains("/snapchat") -> "Snapchat"
+            else -> "Другое"
         }
     }
 }
