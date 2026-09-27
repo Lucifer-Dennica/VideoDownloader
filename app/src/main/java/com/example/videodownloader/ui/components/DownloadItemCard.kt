@@ -205,8 +205,8 @@ fun DownloadItemCard(
                     verticalArrangement = Arrangement.Center
                 ) {
                     if (item.status == "COMPLETED") {
-                        CardActionButton("📁", onOpenFolder)
-                        CardActionButton("📤", onShare)
+                        CardActionButton("📁") { onOpenFolder(item) }
+                        CardActionButton("📤") { onShare(item) }
                     }
                     CardActionButton("🗑", onDelete)
                 }
