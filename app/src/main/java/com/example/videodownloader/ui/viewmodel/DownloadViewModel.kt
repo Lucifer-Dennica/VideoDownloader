@@ -11,6 +11,7 @@ import androidx.work.workDataOf
 import com.example.videodownloader.data.local.DownloadEntity
 import com.example.videodownloader.data.repository.DownloadRepository
 import com.example.videodownloader.data.settings.SettingsRepository
+import com.example.videodownloader.data.settings.VideoQuality
 import com.example.videodownloader.download.DownloadWorker
 import com.example.videodownloader.util.UrlParser
 import kotlinx.coroutines.Dispatchers
@@ -25,9 +26,6 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = SettingsRepository(app)
 
     @Volatile private var isScanning = false
-
-    // ⚠️ В init НЕ сканируем — сканируем после того, как UI отрисовался (autoScan)
-    // init оставляем пустым, чтобы приложение стартовало мгновенно
 
     val items = repo.items.stateIn(
         viewModelScope,
@@ -45,10 +43,6 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         .map { list -> list.filter { it.status == "COMPLETED" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /**
-     * Автоматический инкрементальный скан. Вызывать после отрисовки UI.
-     * Троттлинг: не чаще раза в 60 секунд.
-     */
     fun autoScan() = viewModelScope.launch(Dispatchers.IO) {
         if (isScanning) return@launch
         isScanning = true
@@ -56,14 +50,12 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
             val last = settings.getLastScanTime()
             repo.scanFolder(sinceMs = last)
             settings.setLastScanTime(System.currentTimeMillis())
-        } catch (e: Exception) {
-            // ignore
+        } catch (_: Exception) {
         } finally {
             isScanning = false
         }
     }
 
-    /** Ручной полный скан (кнопка «Обновить»). */
     fun rescanFolder() = viewModelScope.launch(Dispatchers.IO) {
         if (isScanning) return@launch
         isScanning = true
@@ -78,29 +70,59 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
     fun enqueue(raw: String, audio: Boolean = false) {
         val parsed = UrlParser.parse(raw) ?: return
         viewModelScope.launch {
-            val quality = settings.getVideoQuality()
+            // Качество скрыто из UI — всегда MAX.
+            // Когда вернём UI, здесь будет settings.getVideoQuality().
+            val quality = VideoQuality.MAX
             val title = when {
                 audio -> "Аудио • ${parsed.service}"
                 else -> "Видео • ${parsed.service}"
             }
             val id = repo.add(parsed.value, title)
-            val request = OneTimeWorkRequestBuilder<DownloadWorker>()
-                .setInputData(
-                    workDataOf(
-                        DownloadWorker.KEY_URL to parsed.value,
-                        DownloadWorker.KEY_ID to id,
-                        DownloadWorker.KEY_QUALITY to quality.name,
-                        DownloadWorker.KEY_AUDIO to audio
-                    )
-                )
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
-                )
-                .build()
-            WorkManager.getInstance(getApplication()).enqueue(request)
+            enqueueWorker(
+                id = id,
+                url = parsed.value,
+                quality = quality,
+                audio = audio
+            )
         }
+    }
+
+    /** Повторить загрузку для упавшей записи. */
+    fun retry(item: DownloadEntity) = viewModelScope.launch {
+        val audio = item.type == "AUDIO"
+        // Сбрасываем статус
+        repo.update(item.copy(status = "QUEUED", error = null, progress = 0))
+        enqueueWorker(
+            id = item.id,
+            url = item.url,
+            quality = VideoQuality.MAX,
+            audio = audio
+        )
+    }
+
+    private fun enqueueWorker(
+        id: Long,
+        url: String,
+        quality: VideoQuality,
+        audio: Boolean
+    ) {
+        val request = OneTimeWorkRequestBuilder<DownloadWorker>()
+            .setInputData(
+                workDataOf(
+                    DownloadWorker.KEY_URL to url,
+                    DownloadWorker.KEY_ID to id,
+                    DownloadWorker.KEY_QUALITY to quality.name,
+                    DownloadWorker.KEY_AUDIO to audio
+                )
+            )
+            .addTag(id.toString())  // ← фикс: теперь cancelAllWorkByTag реально находит задачу
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+        WorkManager.getInstance(getApplication()).enqueue(request)
     }
 
     fun delete(item: DownloadEntity) = viewModelScope.launch {
