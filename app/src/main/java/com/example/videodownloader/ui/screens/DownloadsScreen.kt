@@ -24,6 +24,7 @@ fun DownloadsScreen(
     items: List<DownloadEntity>,
     onDelete: (DownloadEntity) -> Unit,
     onDeleteMany: (List<DownloadEntity>) -> Unit,
+    onRetry: (DownloadEntity) -> Unit,
     onRescan: () -> Unit
 ) {
     val context = LocalContext.current
@@ -114,6 +115,7 @@ fun DownloadsScreen(
                         onOpen = { openItem(context, it) },
                         onOpenFolder = { openFolder(context, it) },
                         onShare = { ShareUtil.shareSingle(context, it) },
+                        onRetry = { onRetry(it) },
                         onLongClick = {
                             selectionMode = true
                             selectedIds = setOf(item.id)
@@ -154,7 +156,6 @@ private fun openItem(context: android.content.Context, item: DownloadEntity) {
         return
     }
 
-    // MIME по типу и расширению — Xiaomi не любит wildcard "audio/*"
     val mimeType = when (item.type) {
         "PHOTOS" -> "image/*"
         "AUDIO" -> when {
