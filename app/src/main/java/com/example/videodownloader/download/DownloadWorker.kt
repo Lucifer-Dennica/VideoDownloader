@@ -261,16 +261,19 @@ class DownloadWorker(
     ): Resolved? {
         val lower = url.lowercase()
 
-        // === АУДИО: всегда через yt-dlp ===
         if (audioOnly) {
             if (lower.endsWith(".mp4") || lower.endsWith(".webm") ||
                 lower.endsWith(".mov") || lower.endsWith(".m4v")) {
                 throw Exception("Аудио из прямых ссылок не поддерживается")
             }
+            // TikTok — через tikwm (yt-dlp не справляется)
+            if (lower.contains("tiktok.com")) {
+                return resolveTikTokAudio(url)
+            }
+            // Остальные — через yt-dlp
             return resolveViaYtdlp(url, quality, audioOnly = true)
         }
 
-        // === ВИДЕО ===
         return when {
             lower.contains("tiktok.com") -> resolveTikTok(url, quality)
             lower.contains("youtube.com") || lower.contains("youtu.be") ->
@@ -293,6 +296,34 @@ class DownloadWorker(
 
             else -> resolveCobalt(url, quality)
         }
+    }
+
+    /**
+     * Аудио из TikTok через tikwm.
+     * Возвращает поле `music` — это аудиодорожка видео (mp3 или m4a).
+     */
+    private fun resolveTikTokAudio(url: String): Resolved? {
+        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
+        Log.d(TAG, "tikwm audio GET $api")
+
+        val json = httpGetString(api, timeoutMs = 20_000)
+            ?: throw Exception("tikwm не ответил")
+
+        val obj = JSONObject(json)
+        if (obj.optInt("code", -1) != 0) {
+            throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
+        }
+        val data = obj.optJSONObject("data")
+            ?: throw Exception("tikwm: нет поля data")
+
+        val music = data.optString("music").ifBlank { null }
+            ?: throw Exception("tikwm: нет аудио (music пустой)")
+
+        val cover = data.optString("cover").ifBlank { null }
+        val ext = if (music.contains(".mp3", true)) "mp3" else "m4a"
+
+        Log.d(TAG, "TikTok audio OK: $music (ext=$ext)")
+        return Resolved(videoUrl = music, thumbnail = cover, extension = ext)
     }
 
     private fun resolveTikTok(url: String, quality: VideoQuality): Resolved? {
@@ -372,10 +403,6 @@ class DownloadWorker(
         return Resolved(videoUrl = media, thumbnail = thumb, extension = ext)
     }
 
-    /**
-     * Cobalt — только публичные бесплатные инстансы.
-     * Railway-Cobalt убран — приложение не зависит от личного сервера.
-     */
     private fun resolveCobalt(
         url: String,
         quality: VideoQuality
