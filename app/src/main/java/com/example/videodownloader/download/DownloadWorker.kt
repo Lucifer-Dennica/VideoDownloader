@@ -79,22 +79,13 @@ class DownloadWorker(
                 val tempFile = File(applicationContext.cacheDir, "media_$id.tmp")
                 val result = downloadFile(mediaUrl, tempFile, id, repository, audioOnly)
 
-                // ⚠️ Проверка результата для аудио
-                if (audioOnly) {
-                    if (result.size < 10_000L) {
-                        tempFile.delete()
-                        throw Exception("Сервер вернул пустой аудиофайл (${result.size} Б). Cobalt не поддерживает аудио для этой ссылки.")
-                    }
-                    if (result.contentType != null &&
-                        !result.contentType.startsWith("audio") &&
-                        !result.contentType.startsWith("video")) {
-                        tempFile.delete()
-                        throw Exception("Сервер вернул ${result.contentType}, а не аудио. Режим аудио не поддерживается.")
-                    }
+                if (audioOnly && result.size < 10_000L) {
+                    tempFile.delete()
+                    throw Exception("Сервер вернул пустой аудиофайл (${result.size} Б)")
                 }
 
-                // Определяем реальное расширение по Content-Type
-                val extension = detectExtension(result.contentType, audioOnly)
+                val extension = resolved.extension
+                    ?: detectExtension(result.contentType, audioOnly)
                 val fileName = "${if (audioOnly) "audio" else "video"}_${id}_${System.currentTimeMillis()}.$extension"
                 val savedPath = if (audioOnly) {
                     saveAudioToPublicMusic(tempFile, fileName, service)
@@ -132,17 +123,16 @@ class DownloadWorker(
         }
     }
 
-    /** Определяет расширение файла по Content-Type. */
     private fun detectExtension(contentType: String?, audioOnly: Boolean): String {
         if (audioOnly) {
             return when {
-                contentType == null -> "mp3"
+                contentType == null -> "m4a"
                 contentType.contains("mpeg", ignoreCase = true) -> "mp3"
                 contentType.contains("mp4", ignoreCase = true) -> "m4a"
                 contentType.contains("aac", ignoreCase = true) -> "aac"
                 contentType.contains("ogg", ignoreCase = true) -> "ogg"
                 contentType.contains("webm", ignoreCase = true) -> "weba"
-                else -> "mp3"
+                else -> "m4a"
             }
         } else {
             return when {
@@ -156,7 +146,8 @@ class DownloadWorker(
     data class Resolved(
         val videoUrl: String? = null,
         val imageUrls: List<String> = emptyList(),
-        val thumbnail: String? = null
+        val thumbnail: String? = null,
+        val extension: String? = null
     )
 
     data class CarouselResult(val firstUri: String?, val folderPath: String)
@@ -270,18 +261,22 @@ class DownloadWorker(
     ): Resolved? {
         val lower = url.lowercase()
 
+        // === АУДИО: всегда через yt-dlp ===
         if (audioOnly) {
             if (lower.endsWith(".mp4") || lower.endsWith(".webm") ||
                 lower.endsWith(".mov") || lower.endsWith(".m4v")) {
                 throw Exception("Аудио из прямых ссылок не поддерживается")
             }
-            return resolveCobalt(url, quality, audioOnly = true)
+            return resolveViaYtdlp(url, quality, audioOnly = true)
         }
 
+        // === ВИДЕО ===
         return when {
             lower.contains("tiktok.com") -> resolveTikTok(url, quality)
-            lower.contains("youtube.com") || lower.contains("youtu.be") -> resolveViaYtdlp(url)
-            lower.contains("instagram.com") -> resolveViaYtdlp(url)
+            lower.contains("youtube.com") || lower.contains("youtu.be") ->
+                resolveViaYtdlp(url, quality, audioOnly = false)
+            lower.contains("instagram.com") ->
+                resolveViaYtdlp(url, quality, audioOnly = false)
             lower.contains("facebook.com") || lower.contains("fb.watch") ||
             lower.contains("vk.com") || lower.contains("twitter.com") ||
             lower.contains("x.com") || lower.contains("reddit.com") ||
@@ -340,8 +335,21 @@ class DownloadWorker(
         return Resolved(videoUrl = video, thumbnail = cover)
     }
 
-    private fun resolveViaYtdlp(url: String): Resolved? {
-        val body = """{"url":"$url"}"""
+    private fun resolveViaYtdlp(
+        url: String,
+        quality: VideoQuality,
+        audioOnly: Boolean
+    ): Resolved? {
+        val qualityStr = when (quality) {
+            VideoQuality.MAX -> "max"
+            VideoQuality.P1080 -> "1080"
+            VideoQuality.P720 -> "720"
+            VideoQuality.P480 -> "480"
+            VideoQuality.P360 -> "360"
+        }
+        val body = """{"url":"$url","audio_only":$audioOnly,"quality":"$qualityStr"}"""
+        Log.d(TAG, "yt-dlp request: $body")
+
         val response = httpPostJson(YTDLP_URL, body, timeoutMs = 60_000)
             ?: throw Exception("yt-dlp сервер не ответил")
         val obj = JSONObject(response)
@@ -356,10 +364,12 @@ class DownloadWorker(
             }
             throw Exception("yt-dlp: " + detail.take(150))
         }
-        val video = obj.optString("video_url").ifBlank { null }
+        val media = obj.optString("video_url").ifBlank { null }
             ?: throw Exception("yt-dlp: нет ссылки")
         val thumb = obj.optString("thumbnail").ifBlank { null }
-        return Resolved(videoUrl = video, thumbnail = thumb)
+        val ext = obj.optString("ext").ifBlank { null }
+        Log.d(TAG, "yt-dlp OK: ext=$ext")
+        return Resolved(videoUrl = media, thumbnail = thumb, extension = ext)
     }
 
     private fun resolveCobalt(
@@ -380,9 +390,7 @@ class DownloadWorker(
             listOf(
                 """{"url":"$url","downloadMode":"audio","audioFormat":"mp3"}""",
                 """{"url":"$url","downloadMode":"audio"}""",
-                """{"url":"$url","downloadMode":"audio","audioFormat":"best"}""",
-                """{"url":"$url","isAudioOnly":true}""",
-                """{"url":"$url","isAudioOnly":true,"aFormat":"mp3"}"""
+                """{"url":"$url","isAudioOnly":true}"""
             )
         } else {
             listOf(
@@ -416,7 +424,7 @@ class DownloadWorker(
                         else ""
                     }.ifBlank { null } ?: continue
                     val thumb = obj.optString("thumbnail").ifBlank { null }
-                    Log.d(TAG, "Cobalt OK через $base (вар. ${idx + 1})")
+                    Log.d(TAG, "Cobalt OK через $base")
                     return Resolved(videoUrl = media, thumbnail = thumb)
                 } catch (e: Exception) {
                     lastError = e.message ?: "unknown"
@@ -547,6 +555,7 @@ class DownloadWorker(
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val mime = when {
+                fileName.endsWith(".mp3") -> "audio/mpeg"
                 fileName.endsWith(".m4a") -> "audio/mp4"
                 fileName.endsWith(".aac") -> "audio/aac"
                 fileName.endsWith(".ogg") -> "audio/ogg"
