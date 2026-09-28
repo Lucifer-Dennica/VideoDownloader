@@ -57,26 +57,27 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.6.8.apk
+          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.7.0.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-v1.6.8
-          path: release/VideoDownloader-v1.6.8.apk
+          name: VideoDownloader-v1.7.0
+          path: release/VideoDownloader-v1.7.0.apk
           if-no-files-found: error
 
       - name: Attach APK to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/VideoDownloader-v1.6.8.apk
+          files: release/VideoDownloader-v1.7.0.apk
           tag_name: ${{ github.event.release.tag_name }}
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Release-сборка (быстрее debug)
-            - Fix: аудио TikTok через tikwm
-            - Fix: убрана deprecated инициализация WorkManager
+            - Счётчик на вкладке «Загрузки» (3 режима: Выкл / В очереди / Всего)
+            - Кнопка 🔄 «Повторить» на упавших загрузках
+            - Fix: отмена загрузки теперь реально работает (тег WorkManager)
+            - Качество скрыто из настроек (вернём с YouTube)
           draft: false
           prerelease: false
