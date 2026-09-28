@@ -41,7 +41,6 @@ fun DownloadsScreen(
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
 
-        // ============ ВЕРХНЯЯ ПАНЕЛЬ ============
         if (selectionMode) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -155,9 +154,17 @@ private fun openItem(context: android.content.Context, item: DownloadEntity) {
         return
     }
 
+    // MIME по типу и расширению — Xiaomi не любит wildcard "audio/*"
     val mimeType = when (item.type) {
         "PHOTOS" -> "image/*"
-        "AUDIO" -> "audio/*"
+        "AUDIO" -> when {
+            path.endsWith(".m4a", true) -> "audio/mp4"
+            path.endsWith(".aac", true) -> "audio/aac"
+            path.endsWith(".ogg", true) -> "audio/ogg"
+            path.endsWith(".weba", true) -> "audio/webm"
+            path.endsWith(".wav", true) -> "audio/wav"
+            else -> "audio/mpeg"
+        }
         else -> "video/mp4"
     }
 
@@ -189,7 +196,7 @@ private fun openFolder(context: android.content.Context, item: DownloadEntity) {
     val service = detectService(item)
     val path = when {
         !item.folderPath.isNullOrBlank() -> item.folderPath.trimEnd('/')
-        item.type == "AUDIO" -> "DCIM/VideoDownloader/$service/Audio"
+        item.type == "AUDIO" -> "Music/VideoDownloader/$service/Audio"
         else -> "DCIM/VideoDownloader/$service"
     }
 
