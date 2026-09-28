@@ -18,8 +18,20 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads WHERE folderPath = :path LIMIT 1")
     suspend fun getByFolderPath(path: String): DownloadEntity?
 
+    /** Все непустые filePath — для O(1) проверки дубликатов при скане. */
+    @Query("SELECT filePath FROM downloads WHERE filePath IS NOT NULL")
+    suspend fun getAllFilePaths(): List<String>
+
+    /** Все непустые folderPath — для проверки альбомов. */
+    @Query("SELECT folderPath FROM downloads WHERE folderPath IS NOT NULL")
+    suspend fun getAllFolderPaths(): List<String>
+
     @Insert
     suspend fun insert(item: DownloadEntity): Long
+
+    /** Пакетная вставка — один transaction, один emit Flow. */
+    @Insert
+    suspend fun insertAll(items: List<DownloadEntity>): List<Long>
 
     @Update
     suspend fun update(item: DownloadEntity)
