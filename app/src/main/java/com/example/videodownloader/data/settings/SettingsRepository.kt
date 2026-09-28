@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.map
 
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
-/** Качество видео. Скрыто из UI до тех пор, пока не заведётся YouTube. */
 enum class VideoQuality(
     val label: String,
     val cobaltValue: String,
@@ -34,7 +33,10 @@ enum class VideoQuality(
 enum class ThemeMode(val label: String) {
     SYSTEM("Системная"),
     LIGHT("Светлая"),
-    DARK("Тёмная");
+    DARK("Тёмная"),
+    NEON("Неоновая"),
+    AMOLED("AMOLED"),
+    OCEAN("Океан");
 
     companion object {
         fun fromName(name: String?): ThemeMode =
