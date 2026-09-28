@@ -286,12 +286,12 @@ class DownloadWorker(
             lower.contains("rumble.com") || lower.contains("odysee.com") ||
             lower.contains("soundcloud.com") || lower.contains("rutube.ru") ||
             lower.contains("linkedin.com") || lower.contains("threads.net") ||
-            lower.contains("tumblr.com") -> resolveCobalt(url, quality, audioOnly = false)
+            lower.contains("tumblr.com") -> resolveCobalt(url, quality)
 
             lower.endsWith(".mp4") || lower.endsWith(".webm") ||
             lower.endsWith(".mov") || lower.endsWith(".m4v") -> Resolved(videoUrl = url)
 
-            else -> resolveCobalt(url, quality, audioOnly = false)
+            else -> resolveCobalt(url, quality)
         }
     }
 
@@ -372,32 +372,26 @@ class DownloadWorker(
         return Resolved(videoUrl = media, thumbnail = thumb, extension = ext)
     }
 
+    /**
+     * Cobalt — только публичные бесплатные инстансы.
+     * Railway-Cobalt убран — приложение не зависит от личного сервера.
+     */
     private fun resolveCobalt(
         url: String,
-        quality: VideoQuality,
-        audioOnly: Boolean
+        quality: VideoQuality
     ): Resolved? {
         val instances = listOf(
             "https://cobalt-api.kwiatekmiki.com/",
             "https://co.eepy.today/",
             "https://cobalt-api.ayo.tf/",
             "https://cobalt.255x.ru/",
-            "https://api.cobalt.best/",
-            COBALT_URL
+            "https://api.cobalt.best/"
         )
 
-        val bodies = if (audioOnly) {
-            listOf(
-                """{"url":"$url","downloadMode":"audio","audioFormat":"mp3"}""",
-                """{"url":"$url","downloadMode":"audio"}""",
-                """{"url":"$url","isAudioOnly":true}"""
-            )
-        } else {
-            listOf(
-                """{"url":"$url","videoQuality":"${quality.cobaltValue}"}""",
-                """{"url":"$url","vQuality":"${quality.cobaltValue}"}"""
-            )
-        }
+        val bodies = listOf(
+            """{"url":"$url","videoQuality":"${quality.cobaltValue}"}""",
+            """{"url":"$url","vQuality":"${quality.cobaltValue}"}"""
+        )
 
         var lastError = "Нет инстансов"
 
@@ -627,6 +621,5 @@ class DownloadWorker(
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         private const val YTDLP_URL = "https://ytdlp-server-production-16c0.up.railway.app/api/resolve"
-        private const val COBALT_URL = "https://cobalt-tools-production-e535.up.railway.app/"
     }
 }
