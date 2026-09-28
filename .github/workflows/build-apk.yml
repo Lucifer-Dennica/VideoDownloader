@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Build debug APK
+    name: Build release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -51,34 +51,31 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
 
       - name: Rename APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/VideoDownloader-v1.6.6.apk
+          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.6.7.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-v1.6.6
-          path: release/VideoDownloader-v1.6.6.apk
+          name: VideoDownloader-v1.6.7
+          path: release/VideoDownloader-v1.6.7.apk
           if-no-files-found: error
 
       - name: Attach APK to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/VideoDownloader-v1.6.6.apk
+          files: release/VideoDownloader-v1.6.7.apk
           tag_name: ${{ github.event.release.tag_name }}
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Инкрементальный скан MediaStore (быстрее старт)
-            - Batch-insert в Room (меньше recompose)
-            - Системные превью видео (быстро)
-            - Превью в filesDir (не чистятся системой)
-            - Убран Railway Cobalt (только публичные инстансы)
+            - ⚡ Release-сборка (в разы быстрее debug)
+            - Fix: аудио TikTok через tikwm (yt-dlp не тянет)
           draft: false
           prerelease: false
