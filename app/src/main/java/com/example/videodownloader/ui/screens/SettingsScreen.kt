@@ -8,12 +8,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
@@ -92,7 +92,6 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
         return
     }
 
-    // Диалог выбора качества
     if (showQualityDialog) {
         AlertDialog(
             onDismissRequest = { showQualityDialog = false },
@@ -176,7 +175,6 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        // ============ РАЗДЕЛ: ЗАГРУЗКА ============
         SectionHeader("Загрузка")
 
         SettingItem(
@@ -207,7 +205,7 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
         SettingSwitch(
             icon = Icons.Default.MusicNote,
             title = "Только аудио",
-            subtitle = "Скачивать только звук (M4A)",
+            subtitle = "Скачивать только звук",
             checked = audioOnly,
             onCheckedChange = { enabled ->
                 scope.launch {
@@ -221,7 +219,6 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ РАЗДЕЛ: ФАЙЛЫ ============
         SectionHeader("Файлы")
 
         SettingItem(
@@ -250,18 +247,17 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ РАЗДЕЛ: СПРАВКА ============
         SectionHeader("Справка")
 
         SettingItem(
-            icon = Icons.Default.HelpOutline,
+            icon = Icons.AutoMirrored.Filled.HelpOutline,
             title = "Instagram — как скачивать",
             subtitle = "Требуется авторизация",
             onClick = { showInstagramHelp = true }
         )
 
         SettingItem(
-            icon = Icons.Default.HelpOutline,
+            icon = Icons.AutoMirrored.Filled.HelpOutline,
             title = "YouTube — ограничения",
             subtitle = "Почему иногда требует вход",
             onClick = { showYoutubeHelp = true }
@@ -269,7 +265,6 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ РАЗДЕЛ: О ПРИЛОЖЕНИИ ============
         SectionHeader("О приложении")
 
         SettingItem(
@@ -302,7 +297,6 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ РАЗДЕЛ: ПРАВОВАЯ ИНФОРМАЦИЯ ============
         SectionHeader("Правовая информация")
 
         SettingItem(
