@@ -72,40 +72,39 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Пересчитать статистику (для экрана настроек). */
     fun loadStatistics() = viewModelScope.launch(Dispatchers.IO) {
         try {
             _statistics.value = repo.getStatistics()
         } catch (_: Exception) { }
     }
 
+    /** Одна ссылка — отправить. */
     fun enqueue(raw: String, audio: Boolean = false) {
         val parsed = UrlParser.parse(raw) ?: return
         viewModelScope.launch {
-            val quality = VideoQuality.MAX
-            val title = when {
-                audio -> "Аудио • ${parsed.service}"
-                else -> "Видео • ${parsed.service}"
-            }
+            val title = if (audio) "Аудио • ${parsed.service}" else "Видео • ${parsed.service}"
             val id = repo.add(parsed.value, title)
-            enqueueWorker(
-                id = id,
-                url = parsed.value,
-                quality = quality,
-                audio = audio
-            )
+            enqueueWorker(id, parsed.value, VideoQuality.MAX, audio)
+        }
+    }
+
+    /** Несколько ссылок из текста — ставим все в очередь. */
+    fun enqueueMany(text: String, audio: Boolean = false) {
+        val parsedList = UrlParser.parseAll(text)
+        if (parsedList.isEmpty()) return
+        viewModelScope.launch {
+            for (parsed in parsedList) {
+                val title = if (audio) "Аудио • ${parsed.service}" else "Видео • ${parsed.service}"
+                val id = repo.add(parsed.value, title)
+                enqueueWorker(id, parsed.value, VideoQuality.MAX, audio)
+            }
         }
     }
 
     fun retry(item: DownloadEntity) = viewModelScope.launch {
         val audio = item.type == "AUDIO"
         repo.update(item.copy(status = "QUEUED", error = null, progress = 0))
-        enqueueWorker(
-            id = item.id,
-            url = item.url,
-            quality = VideoQuality.MAX,
-            audio = audio
-        )
+        enqueueWorker(item.id, item.url, VideoQuality.MAX, audio)
     }
 
     private fun enqueueWorker(
