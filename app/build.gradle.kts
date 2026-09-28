@@ -13,18 +13,30 @@ android {
         applicationId = "com.example.videodownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 15
-        versionName = "1.6.6"
+        versionCode = 16
+        versionName = "1.6.7"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    // ⚡ Release-сборка подписана debug-ключом — так же ставится, но работает в разы быстрее
+    signingConfigs {
+        getByName("debug") {
+            // используем стандартный debug.keystore
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            isShrinkResources = false
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            // оставляем как есть
         }
     }
 
