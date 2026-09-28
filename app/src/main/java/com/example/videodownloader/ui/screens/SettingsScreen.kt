@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
@@ -18,7 +19,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,8 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkManager
 import com.example.videodownloader.BuildConfig
+import com.example.videodownloader.data.settings.BadgeMode
 import com.example.videodownloader.data.settings.SettingsRepository
-import com.example.videodownloader.data.settings.VideoQuality
 import com.example.videodownloader.util.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,12 +49,12 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var showRulesDialog by remember { mutableStateOf(false) }
     var showSecurityDialog by remember { mutableStateOf(false) }
-    var showQualityDialog by remember { mutableStateOf(false) }
+    var showBadgeDialog by remember { mutableStateOf(false) }
 
-    val videoQuality by settings.videoQuality.collectAsState(initial = VideoQuality.MAX)
     val audioOnly by settings.audioOnly.collectAsState(initial = false)
     val autoPaste by settings.autoPaste.collectAsState(initial = false)
     val autoDownload by settings.autoDownload.collectAsState(initial = false)
+    val badgeMode by settings.badgeMode.collectAsState(initial = BadgeMode.OFF)
 
     val cookiesPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -92,38 +92,38 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
         return
     }
 
-    if (showQualityDialog) {
+    if (showBadgeDialog) {
         AlertDialog(
-            onDismissRequest = { showQualityDialog = false },
-            title = { Text("Качество видео") },
+            onDismissRequest = { showBadgeDialog = false },
+            title = { Text("Счётчик на панели") },
             text = {
                 Column {
-                    VideoQuality.entries.forEach { q ->
+                    BadgeMode.entries.forEach { mode ->
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    scope.launch { settings.setVideoQuality(q) }
-                                    showQualityDialog = false
+                                    scope.launch { settings.setBadgeMode(mode) }
+                                    showBadgeDialog = false
                                 }
                                 .padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = videoQuality == q,
+                                selected = badgeMode == mode,
                                 onClick = {
-                                    scope.launch { settings.setVideoQuality(q) }
-                                    showQualityDialog = false
+                                    scope.launch { settings.setBadgeMode(mode) }
+                                    showBadgeDialog = false
                                 }
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(q.label, style = MaterialTheme.typography.bodyLarge)
+                            Text(mode.label, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showQualityDialog = false }) { Text("Закрыть") }
+                TextButton(onClick = { showBadgeDialog = false }) { Text("Закрыть") }
             }
         )
     }
@@ -175,14 +175,8 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
+        // ============ ЗАГРУЗКА ============
         SectionHeader("Загрузка")
-
-        SettingItem(
-            icon = Icons.Default.Tune,
-            title = "Качество видео",
-            subtitle = videoQuality.label,
-            onClick = { showQualityDialog = true }
-        )
 
         SettingSwitch(
             icon = Icons.Default.ContentPaste,
@@ -219,6 +213,19 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
+        // ============ ИНТЕРФЕЙС ============
+        SectionHeader("Интерфейс")
+
+        SettingItem(
+            icon = Icons.Default.Badge,
+            title = "Счётчик на панели",
+            subtitle = badgeMode.label,
+            onClick = { showBadgeDialog = true }
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // ============ ФАЙЛЫ ============
         SectionHeader("Файлы")
 
         SettingItem(
@@ -247,6 +254,7 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
+        // ============ СПРАВКА ============
         SectionHeader("Справка")
 
         SettingItem(
@@ -265,6 +273,7 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
+        // ============ О ПРИЛОЖЕНИИ ============
         SectionHeader("О приложении")
 
         SettingItem(
@@ -297,6 +306,7 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
 
         Spacer(Modifier.height(16.dp))
 
+        // ============ ПРАВОВАЯ ИНФОРМАЦИЯ ============
         SectionHeader("Правовая информация")
 
         SettingItem(
