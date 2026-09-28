@@ -30,6 +30,7 @@ import com.example.videodownloader.ui.viewmodel.DownloadViewModel
 import com.example.videodownloader.util.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -196,6 +197,12 @@ private fun VideoDownloaderRoot(
     val active by vm.activeItems.collectAsState()
     val completed by vm.completedItems.collectAsState()
 
+    // Автоскан после первой отрисовки UI
+    LaunchedEffect(Unit) {
+        delay(800)
+        vm.autoScan()
+    }
+
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -214,7 +221,6 @@ private fun VideoDownloaderRoot(
     ) { pad ->
         HorizontalPager(
             state = pagerState,
-            // ⚠️ Держим все 3 страницы в памяти — не пересобираем при каждом свайпе
             beyondViewportPageCount = 2,
             modifier = Modifier.padding(pad).fillMaxSize()
         ) { page ->
