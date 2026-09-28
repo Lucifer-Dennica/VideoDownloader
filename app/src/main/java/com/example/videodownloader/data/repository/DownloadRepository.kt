@@ -23,12 +23,44 @@ class DownloadRepository(context: Context) {
 
     val items: Flow<List<DownloadEntity>> = dao.observeAll()
 
+    data class Statistics(
+        val total: Int,
+        val thisMonth: Int,
+        val totalSizeBytes: Long
+    )
+
     suspend fun add(url: String, title: String) =
         dao.insert(DownloadEntity(url = url, title = title))
 
     suspend fun getById(id: Long) = dao.getById(id)
     suspend fun update(item: DownloadEntity) = dao.update(item)
     suspend fun delete(item: DownloadEntity) = dao.delete(item)
+
+    /** Считает статистику: всего/за месяц/общий размер. */
+    suspend fun getStatistics(): Statistics = withContext(Dispatchers.IO) {
+        val total = dao.getCompletedCount()
+        val monthAgoMs = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+        val thisMonth = dao.getCompletedCountSince(monthAgoMs)
+
+        var totalSize = 0L
+        try {
+            val paths = dao.getCompletedFilePaths()
+            for (path in paths) {
+                try {
+                    totalSize += if (path.startsWith("content://")) {
+                        appContext.contentResolver.openAssetFileDescriptor(Uri.parse(path), "r")
+                            ?.use { it.length } ?: 0L
+                    } else {
+                        File(path).takeIf { it.exists() }?.length() ?: 0L
+                    }
+                } catch (_: Exception) { }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "getStatistics size error: ${e.message}")
+        }
+
+        Statistics(total = total, thisMonth = thisMonth, totalSizeBytes = totalSize)
+    }
 
     suspend fun deleteWithFile(item: DownloadEntity) = withContext(Dispatchers.IO) {
         try {
@@ -78,11 +110,6 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    /**
-     * Инкрементальный скан MediaStore.
-     * @param sinceMs если > 0 — берём только файлы новее этой метки (инкремент).
-     *                если 0 — полный скан (кнопка «Обновить»).
-     */
     suspend fun scanFolder(sinceMs: Long = 0L) = withContext(Dispatchers.IO) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@withContext
         val start = System.currentTimeMillis()
@@ -98,7 +125,6 @@ class DownloadRepository(context: Context) {
         Log.d(TAG, "scanFolder done in ${System.currentTimeMillis() - start}ms")
     }
 
-    // ---------- ВИДЕО ----------
     private suspend fun scanVideos(sinceMs: Long, existing: Set<String>) {
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
@@ -169,7 +195,6 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    // ---------- АУДИО ----------
     private suspend fun scanAudio(sinceMs: Long, existing: Set<String>) {
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
@@ -236,13 +261,6 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    // ---------- ПРЕВЬЮ ----------
-    /**
-     * Сначала пробуем системное превью (ContentResolver.loadThumbnail, API 29+).
-     * Он быстрый — Android уже сгенерил превью при сохранении видео.
-     * Fallback — MediaMetadataRetriever (медленно, но работает везде).
-     * Файлы — в filesDir (не чистится системой в отличие от cacheDir).
-     */
     @RequiresApi(Build.VERSION_CODES.Q)
     private suspend fun generateThumbnail(mediaId: Long, name: String): String? =
         withContext(Dispatchers.IO) {
@@ -254,7 +272,6 @@ class DownloadRepository(context: Context) {
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId
             )
 
-            // Быстрый путь: системное превью
             try {
                 val size = android.util.Size(320, 180)
                 val bmp = appContext.contentResolver.loadThumbnail(videoUri, size, null)
@@ -267,7 +284,6 @@ class DownloadRepository(context: Context) {
                 Log.d(TAG, "loadThumbnail failed for $name: ${e.message}, fallback")
             }
 
-            // Медленный fallback
             val retriever = MediaMetadataRetriever()
             try {
                 retriever.setDataSource(appContext, videoUri)
@@ -288,7 +304,6 @@ class DownloadRepository(context: Context) {
             }
         }
 
-    // ---------- ФОТО ----------
     private suspend fun scanPhotos(sinceMs: Long, existingFolders: Set<String>) {
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
