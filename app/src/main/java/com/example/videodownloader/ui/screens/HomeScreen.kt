@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -26,6 +27,7 @@ fun HomeScreen(
     activeItems: List<DownloadEntity>,
     onDownloadVideo: (String) -> Unit,
     onDownloadAudio: (String) -> Unit,
+    onDownloadMany: (String) -> Unit,
     onDelete: (DownloadEntity) -> Unit
 ) {
     val context = LocalContext.current
@@ -33,14 +35,14 @@ fun HomeScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var link by remember(initialLink) { mutableStateOf(initialLink) }
-
-    // ⚠️ Кэшируем парсинг — не гоняем Uri.parse на каждый recompose
-    val parsed = remember(link) { UrlParser.parse(link) }
+    val parsedList = remember(link) { UrlParser.parseAll(link) }
+    val hasText = link.isNotBlank()
 
     val autoPaste by settings.autoPaste.collectAsState(initial = false)
     val autoDownload by settings.autoDownload.collectAsState(initial = false)
     val audioOnly by settings.audioOnly.collectAsState(initial = false)
 
+    // ---- Автопаста из буфера ----
     DisposableEffect(lifecycleOwner, autoPaste) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME && autoPaste && link.isBlank()) {
@@ -49,7 +51,7 @@ fun HomeScreen(
                     cm.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
                 } catch (_: Exception) { null }
 
-                if (!clip.isNullOrBlank() && UrlParser.parse(clip) != null) {
+                if (!clip.isNullOrBlank() && UrlParser.parseAll(clip).isNotEmpty()) {
                     link = clip
                 }
             }
@@ -58,12 +60,12 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // ---- Автоскачивание только для ОДНОЙ ссылки ----
     LaunchedEffect(link, autoDownload, audioOnly) {
         if (!autoDownload || audioOnly) return@LaunchedEffect
-        if (link.isBlank()) return@LaunchedEffect
-        if (UrlParser.parse(link) == null) return@LaunchedEffect
+        if (parsedList.size != 1) return@LaunchedEffect
         delay(800)
-        onDownloadVideo(link)
+        onDownloadVideo(parsedList.first().value)
         link = ""
     }
 
@@ -72,13 +74,51 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("VideoDownloader", style = MaterialTheme.typography.headlineLarge)
-        Text("Вставьте ссылку на видео из TikTok, YouTube, Instagram или прямую ссылку на файл.")
+        Text("Вставьте одну или несколько ссылок — по одной на строку.")
 
         LinkInputField(link) { link = it }
 
-        if (parsed != null) {
-            AssistChip(onClick = {}, label = { Text("Источник: ${parsed.service}") })
+        // ---- Статус валидации ----
+        when {
+            !hasText -> {
+                // Ничего не показываем, поле пустое
+            }
+            parsedList.isEmpty() -> {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = MaterialTheme.shapes.small
+                ) {
+                    Text(
+                        "⚠️ Не найдено ни одной поддерживаемой ссылки",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
+            parsedList.size == 1 -> {
+                AssistChip(onClick = {}, label = { Text("Источник: ${parsedList.first().service}") })
+            }
+            else -> {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = MaterialTheme.shapes.small
+                ) {
+                    Text(
+                        "Найдено ${parsedList.size} ссылок: " +
+                        parsedList.joinToString(", ") { it.service }.distinct().takeIf { it.isNotBlank() }.orEmpty().let { _ ->
+                            parsedList.map { it.service }.distinct().joinToString(", ")
+                        },
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+            }
         }
+
+        // ---- Кнопки скачивания ----
+        val isMulti = parsedList.size >= 2
 
         if (audioOnly) {
             Row(
@@ -86,22 +126,45 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { onDownloadVideo(link); link = "" },
-                    enabled = parsed != null && link.isNotBlank(),
+                    onClick = {
+                        if (isMulti) onDownloadMany(link)
+                        else onDownloadVideo(link)
+                        link = ""
+                    },
+                    enabled = parsedList.isNotEmpty(),
                     modifier = Modifier.weight(1f)
-                ) { Text("🎬 Скачать") }
+                ) {
+                    Text(if (isMulti) "🎬 Видео (${parsedList.size})" else "🎬 Скачать")
+                }
                 OutlinedButton(
-                    onClick = { onDownloadAudio(link); link = "" },
-                    enabled = parsed != null && link.isNotBlank(),
+                    onClick = {
+                        if (isMulti) onDownloadMany(link)
+                        else onDownloadAudio(link)
+                        link = ""
+                    },
+                    enabled = parsedList.isNotEmpty(),
                     modifier = Modifier.weight(1f)
-                ) { Text("🎵 Аудио") }
+                ) {
+                    Text(if (isMulti) "🎵 Аудио (${parsedList.size})" else "🎵 Аудио")
+                }
             }
         } else {
             Button(
-                onClick = { onDownloadVideo(link); link = "" },
-                enabled = parsed != null && link.isNotBlank(),
+                onClick = {
+                    if (isMulti) onDownloadMany(link)
+                    else onDownloadVideo(link)
+                    link = ""
+                },
+                enabled = parsedList.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("🎬 Скачать") }
+            ) {
+                Text(
+                    when {
+                        isMulti -> "🎬 Скачать все (${parsedList.size})"
+                        else -> "🎬 Скачать"
+                    }
+                )
+            }
         }
 
         Text(
