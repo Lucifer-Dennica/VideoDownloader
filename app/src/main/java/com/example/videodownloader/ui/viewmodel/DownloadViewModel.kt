@@ -24,12 +24,10 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = DownloadRepository(app)
     private val settings = SettingsRepository(app)
 
-    init {
-        // ⚠️ Скан MediaStore — только на IO, иначе блокирует UI
-        viewModelScope.launch(Dispatchers.IO) {
-            repo.scanFolder()
-        }
-    }
+    @Volatile private var isScanning = false
+
+    // ⚠️ В init НЕ сканируем — сканируем после того, как UI отрисовался (autoScan)
+    // init оставляем пустым, чтобы приложение стартовало мгновенно
 
     val items = repo.items.stateIn(
         viewModelScope,
@@ -46,6 +44,36 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
     val completedItems = repo.items
         .map { list -> list.filter { it.status == "COMPLETED" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Автоматический инкрементальный скан. Вызывать после отрисовки UI.
+     * Троттлинг: не чаще раза в 60 секунд.
+     */
+    fun autoScan() = viewModelScope.launch(Dispatchers.IO) {
+        if (isScanning) return@launch
+        isScanning = true
+        try {
+            val last = settings.getLastScanTime()
+            repo.scanFolder(sinceMs = last)
+            settings.setLastScanTime(System.currentTimeMillis())
+        } catch (e: Exception) {
+            // ignore
+        } finally {
+            isScanning = false
+        }
+    }
+
+    /** Ручной полный скан (кнопка «Обновить»). */
+    fun rescanFolder() = viewModelScope.launch(Dispatchers.IO) {
+        if (isScanning) return@launch
+        isScanning = true
+        try {
+            repo.scanFolder(sinceMs = 0L)
+            settings.setLastScanTime(System.currentTimeMillis())
+        } finally {
+            isScanning = false
+        }
+    }
 
     fun enqueue(raw: String, audio: Boolean = false) {
         val parsed = UrlParser.parse(raw) ?: return
@@ -91,9 +119,5 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
             } catch (_: Exception) { }
             repo.deleteWithFile(item)
         }
-    }
-
-    fun rescanFolder() = viewModelScope.launch(Dispatchers.IO) {
-        repo.scanFolder()
     }
 }
