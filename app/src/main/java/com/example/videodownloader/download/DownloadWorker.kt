@@ -19,6 +19,9 @@ import androidx.work.workDataOf
 import com.example.videodownloader.MainActivity
 import com.example.videodownloader.data.repository.DownloadRepository
 import com.example.videodownloader.data.settings.VideoQuality
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -134,7 +137,6 @@ class DownloadWorker(
         }
     }
 
-    /** Из savedPath делает content URI, который можно открыть плеером. */
     private fun buildClickUri(savedPath: String): Uri? {
         return try {
             if (savedPath.startsWith("content://")) {
@@ -342,69 +344,94 @@ class DownloadWorker(
         }
     }
 
-    private fun resolveTikTokAudio(url: String): Resolved? {
-        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
-        Log.d(TAG, "tikwm audio GET $api")
+    /** Аудио TikTok через tikwm — под мьютексом, т.к. у tikwm лимит 1 запрос/сек. */
+    private suspend fun resolveTikTokAudio(url: String): Resolved? {
+        return withTikwmLock {
+            val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
+            Log.d(TAG, "tikwm audio GET $api")
 
-        val json = httpGetString(api, timeoutMs = 20_000)
-            ?: throw Exception("tikwm не ответил")
+            val json = httpGetString(api, timeoutMs = 20_000)
+                ?: throw Exception("tikwm не ответил")
 
-        val obj = JSONObject(json)
-        if (obj.optInt("code", -1) != 0) {
-            throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
+            val obj = JSONObject(json)
+            if (obj.optInt("code", -1) != 0) {
+                throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
+            }
+            val data = obj.optJSONObject("data")
+                ?: throw Exception("tikwm: нет поля data")
+
+            val music = data.optString("music").ifBlank { null }
+                ?: throw Exception("tikwm: нет аудио (music пустой)")
+
+            val cover = data.optString("cover").ifBlank { null }
+            val ext = if (music.contains(".mp3", true)) "mp3" else "m4a"
+
+            Log.d(TAG, "TikTok audio OK: $music (ext=$ext)")
+            Resolved(videoUrl = music, thumbnail = cover, extension = ext)
         }
-        val data = obj.optJSONObject("data")
-            ?: throw Exception("tikwm: нет поля data")
-
-        val music = data.optString("music").ifBlank { null }
-            ?: throw Exception("tikwm: нет аудио (music пустой)")
-
-        val cover = data.optString("cover").ifBlank { null }
-        val ext = if (music.contains(".mp3", true)) "mp3" else "m4a"
-
-        Log.d(TAG, "TikTok audio OK: $music (ext=$ext)")
-        return Resolved(videoUrl = music, thumbnail = cover, extension = ext)
     }
 
-    private fun resolveTikTok(url: String, quality: VideoQuality): Resolved? {
-        val hd = quality.tikwmHd
-        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=$hd"
-        Log.d(TAG, "GET $api")
+    /** Видео TikTok через tikwm — тоже под мьютексом. */
+    private suspend fun resolveTikTok(url: String, quality: VideoQuality): Resolved? {
+        return withTikwmLock {
+            val hd = quality.tikwmHd
+            val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=$hd"
+            Log.d(TAG, "GET $api")
 
-        val json = httpGetString(api, timeoutMs = 20_000)
-            ?: throw Exception("tikwm не ответил")
+            val json = httpGetString(api, timeoutMs = 20_000)
+                ?: throw Exception("tikwm не ответил")
 
-        val obj = JSONObject(json)
-        val code = obj.optInt("code", -1)
-        if (code != 0) {
-            throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
-        }
-
-        val data = obj.optJSONObject("data")
-            ?: throw Exception("tikwm: нет поля data")
-
-        val cover = data.optString("cover").ifBlank { null }
-
-        val imagesArr = data.optJSONArray("images")
-        if (imagesArr != null && imagesArr.length() > 0) {
-            val images = mutableListOf<String>()
-            for (i in 0 until imagesArr.length()) {
-                val img = imagesArr.optString(i, "")
-                if (img.isNotBlank()) images.add(img)
+            val obj = JSONObject(json)
+            val code = obj.optInt("code", -1)
+            if (code != 0) {
+                throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
             }
-            if (images.isNotEmpty()) {
-                Log.d(TAG, "TikTok фото-карусель: ${images.size} фото")
-                return Resolved(imageUrls = images, thumbnail = cover)
+
+            val data = obj.optJSONObject("data")
+                ?: throw Exception("tikwm: нет поля data")
+
+            val cover = data.optString("cover").ifBlank { null }
+
+            val imagesArr = data.optJSONArray("images")
+            if (imagesArr != null && imagesArr.length() > 0) {
+                val images = mutableListOf<String>()
+                for (i in 0 until imagesArr.length()) {
+                    val img = imagesArr.optString(i, "")
+                    if (img.isNotBlank()) images.add(img)
+                }
+                if (images.isNotEmpty()) {
+                    Log.d(TAG, "TikTok фото-карусель: ${images.size} фото")
+                    return@withTikwmLock Resolved(imageUrls = images, thumbnail = cover)
+                }
+            }
+
+            val hdPlay = data.optString("hdplay").ifBlank { null }
+            val sdPlay = data.optString("play").ifBlank { null }
+            val video = if (hd == 1) hdPlay ?: sdPlay else sdPlay ?: hdPlay
+                ?: throw Exception("tikwm: нет ни видео, ни картинок")
+
+            Log.d(TAG, "TikTok OK: hd=$hd")
+            Resolved(videoUrl = video, thumbnail = cover)
+        }
+    }
+
+    /**
+     * Глобальный мьютекс для запросов к tikwm.
+     * tikwm даёт 1 запрос в секунду с одного IP — при пачке из 3+ ссылок
+     * без сериализации 2 из 3 сразу падают с "Free Api Limit".
+     */
+    private suspend fun <T> withTikwmLock(block: suspend () -> T): T {
+        tikwmMutex.withLock {
+            val elapsed = System.currentTimeMillis() - lastTikwmCallMs
+            if (elapsed < TIKWM_MIN_INTERVAL_MS) {
+                delay(TIKWM_MIN_INTERVAL_MS - elapsed)
+            }
+            try {
+                return block()
+            } finally {
+                lastTikwmCallMs = System.currentTimeMillis()
             }
         }
-
-        val hdPlay = data.optString("hdplay").ifBlank { null }
-        val sdPlay = data.optString("play").ifBlank { null }
-        val video = if (hd == 1) hdPlay ?: sdPlay else sdPlay ?: hdPlay
-            ?: throw Exception("tikwm: нет ни видео, ни картинок")
-
-        Log.d(TAG, "TikTok OK: hd=$hd")
-        return Resolved(videoUrl = video, thumbnail = cover)
     }
 
     private fun resolveViaYtdlp(
@@ -652,10 +679,6 @@ class DownloadWorker(
         }
     }
 
-    /**
-     * Уведомление с прогрессом или результат.
-     * Если clickUri задан — тап открывает файл; иначе открывает приложение.
-     */
     private fun showNotification(
         id: Long,
         text: String,
@@ -705,12 +728,7 @@ class DownloadWorker(
             PendingIntent.FLAG_UPDATE_CURRENT
         }
 
-        return PendingIntent.getActivity(
-            applicationContext,
-            id.toInt(),
-            intent,
-            flags
-        )
+        return PendingIntent.getActivity(applicationContext, id.toInt(), intent, flags)
     }
 
     private fun cancelNotificationDelayed(id: Long) {
@@ -732,5 +750,10 @@ class DownloadWorker(
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         private const val YTDLP_URL = "https://ytdlp-server-production-16c0.up.railway.app/api/resolve"
+
+        // tikwm позволяет 1 запрос в секунду с IP. Сериализуем.
+        private const val TIKWM_MIN_INTERVAL_MS = 1100L
+        private val tikwmMutex = Mutex()
+        @Volatile private var lastTikwmCallMs = 0L
     }
 }
