@@ -76,10 +76,25 @@ class DownloadWorker(
                 val mediaUrl = resolved.videoUrl
                     ?: throw Exception("Пустой ответ от сервера")
 
-                val extension = if (audioOnly) "mp3" else "mp4"
-                val tempFile = File(applicationContext.cacheDir, "media_$id.$extension")
-                downloadFile(mediaUrl, tempFile, id, repository, audioOnly)
+                val tempFile = File(applicationContext.cacheDir, "media_$id.tmp")
+                val result = downloadFile(mediaUrl, tempFile, id, repository, audioOnly)
 
+                // ⚠️ Проверка результата для аудио
+                if (audioOnly) {
+                    if (result.size < 10_000L) {
+                        tempFile.delete()
+                        throw Exception("Сервер вернул пустой аудиофайл (${result.size} Б). Cobalt не поддерживает аудио для этой ссылки.")
+                    }
+                    if (result.contentType != null &&
+                        !result.contentType.startsWith("audio") &&
+                        !result.contentType.startsWith("video")) {
+                        tempFile.delete()
+                        throw Exception("Сервер вернул ${result.contentType}, а не аудио. Режим аудио не поддерживается.")
+                    }
+                }
+
+                // Определяем реальное расширение по Content-Type
+                val extension = detectExtension(result.contentType, audioOnly)
                 val fileName = "${if (audioOnly) "audio" else "video"}_${id}_${System.currentTimeMillis()}.$extension"
                 val savedPath = if (audioOnly) {
                     saveAudioToPublicMusic(tempFile, fileName, service)
@@ -117,6 +132,27 @@ class DownloadWorker(
         }
     }
 
+    /** Определяет расширение файла по Content-Type. */
+    private fun detectExtension(contentType: String?, audioOnly: Boolean): String {
+        if (audioOnly) {
+            return when {
+                contentType == null -> "mp3"
+                contentType.contains("mpeg", ignoreCase = true) -> "mp3"
+                contentType.contains("mp4", ignoreCase = true) -> "m4a"
+                contentType.contains("aac", ignoreCase = true) -> "aac"
+                contentType.contains("ogg", ignoreCase = true) -> "ogg"
+                contentType.contains("webm", ignoreCase = true) -> "weba"
+                else -> "mp3"
+            }
+        } else {
+            return when {
+                contentType == null -> "mp4"
+                contentType.contains("webm", ignoreCase = true) -> "webm"
+                else -> "mp4"
+            }
+        }
+    }
+
     data class Resolved(
         val videoUrl: String? = null,
         val imageUrls: List<String> = emptyList(),
@@ -124,6 +160,8 @@ class DownloadWorker(
     )
 
     data class CarouselResult(val firstUri: String?, val folderPath: String)
+
+    data class DownloadResult(val size: Long, val contentType: String?)
 
     private suspend fun downloadPhotoCarousel(
         imageUrls: List<String>,
@@ -324,10 +362,6 @@ class DownloadWorker(
         return Resolved(videoUrl = video, thumbnail = thumb)
     }
 
-    /**
-     * Cobalt — перебираем 5 разных тел запроса для аудио (разные ревизии API).
-     * Для видео — 2 тела. Порядок: сначала новый API (v10), потом старый.
-     */
     private fun resolveCobalt(
         url: String,
         quality: VideoQuality,
@@ -344,15 +378,10 @@ class DownloadWorker(
 
         val bodies = if (audioOnly) {
             listOf(
-                // Cobalt v10, новый API
                 """{"url":"$url","downloadMode":"audio","audioFormat":"mp3"}""",
-                // Cobalt v10 без явного формата
                 """{"url":"$url","downloadMode":"audio"}""",
-                // Cobalt v10 с best-качеством
                 """{"url":"$url","downloadMode":"audio","audioFormat":"best"}""",
-                // Cobalt v7-v9, старый API
                 """{"url":"$url","isAudioOnly":true}""",
-                // Cobalt v7-v9 с форматом
                 """{"url":"$url","isAudioOnly":true,"aFormat":"mp3"}"""
             )
         } else {
@@ -373,7 +402,7 @@ class DownloadWorker(
                     if (status == "error") {
                         val code = obj.optJSONObject("error")?.optString("code") ?: "unknown"
                         lastError = "Cobalt: $code"
-                        Log.w(TAG, "Cobalt $base [вариант ${idx + 1}/${bodies.size}] → $code")
+                        Log.w(TAG, "Cobalt $base [вар. ${idx + 1}/${bodies.size}] → $code")
                         continue
                     }
                     if (status != "tunnel" && status != "redirect" && status != "stream") {
@@ -387,7 +416,7 @@ class DownloadWorker(
                         else ""
                     }.ifBlank { null } ?: continue
                     val thumb = obj.optString("thumbnail").ifBlank { null }
-                    Log.d(TAG, "Cobalt OK через $base (вариант ${idx + 1})")
+                    Log.d(TAG, "Cobalt OK через $base (вар. ${idx + 1})")
                     return Resolved(videoUrl = media, thumbnail = thumb)
                 } catch (e: Exception) {
                     lastError = e.message ?: "unknown"
@@ -441,7 +470,7 @@ class DownloadWorker(
         id: Long,
         repository: DownloadRepository,
         audioOnly: Boolean
-    ) {
+    ): DownloadResult {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 60_000
@@ -451,6 +480,9 @@ class DownloadWorker(
         val action = if (audioOnly) "Скачивание аудио…" else "Скачивание…"
         try {
             if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            val contentType = conn.contentType?.substringBefore(";")?.trim()
+            Log.d(TAG, "downloadFile: $url → content-type=$contentType, size=${conn.contentLengthLong}")
+
             val total = conn.contentLengthLong
             var done = 0L
             var lastNotified = 0
@@ -474,6 +506,7 @@ class DownloadWorker(
                     }
                 }
             }
+            return DownloadResult(size = done, contentType = contentType)
         } finally { conn.disconnect() }
     }
 
@@ -509,17 +542,20 @@ class DownloadWorker(
         }
     }
 
-    /**
-     * Аудио сохраняем в Music/VideoDownloader/{service}/Audio/ — Android запрещает
-     * аудио в DCIM (allowed: Music, Alarms, Ringtones, Notifications, Podcasts...).
-     */
     private fun saveAudioToPublicMusic(tempFile: File, fileName: String, service: String): String {
         val relativePath = Environment.DIRECTORY_MUSIC + "/VideoDownloader/" + service + "/Audio/"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val mime = when {
+                fileName.endsWith(".m4a") -> "audio/mp4"
+                fileName.endsWith(".aac") -> "audio/aac"
+                fileName.endsWith(".ogg") -> "audio/ogg"
+                fileName.endsWith(".weba") -> "audio/webm"
+                else -> "audio/mpeg"
+            }
             val values = ContentValues().apply {
                 put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
-                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mpeg")
+                put(MediaStore.Audio.Media.MIME_TYPE, mime)
                 put(MediaStore.Audio.Media.RELATIVE_PATH, relativePath)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
             }
