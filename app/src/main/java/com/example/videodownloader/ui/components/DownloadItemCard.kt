@@ -46,6 +46,17 @@ fun DownloadItemCard(
     val isCarousel = item.type == "PHOTOS"
     val isAudio = item.type == "AUDIO"
 
+    // Кэшируем модель для Coil
+    val thumbModel: Any? = remember(item.thumbnailUrl) {
+        val t = item.thumbnailUrl ?: return@remember null
+        when {
+            t.startsWith("content://") -> t
+            t.startsWith("http") -> t
+            t.startsWith("/") -> File(t)
+            else -> t
+        }
+    }
+
     val containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
                          else MaterialTheme.colorScheme.surfaceVariant
 
@@ -77,24 +88,19 @@ fun DownloadItemCard(
                 Spacer(Modifier.width(4.dp))
             }
 
-            // --- Превью ---
             Box(
                 modifier = Modifier
                     .width(124.dp)
                     .aspectRatio(16f / 9f)
                     .clip(RoundedCornerShape(8.dp))
             ) {
-                if (item.thumbnailUrl != null) {
-                    val model: Any = when {
-                        item.thumbnailUrl.startsWith("content://") -> item.thumbnailUrl
-                        item.thumbnailUrl.startsWith("http") -> item.thumbnailUrl
-                        item.thumbnailUrl.startsWith("/") -> File(item.thumbnailUrl)
-                        else -> item.thumbnailUrl
-                    }
+                if (thumbModel != null) {
                     AsyncImage(
                         model = ImageRequest.Builder(context)
-                            .data(model)
-                            .crossfade(true)
+                            .data(thumbModel)
+                            // ⚠️ Ключевой фикс: декодируем в нужном размере, не в оригинале
+                            .size(300, 170)
+                            .allowHardware(true)
                             .build(),
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
@@ -118,7 +124,6 @@ fun DownloadItemCard(
                     }
                 }
 
-                // Бейдж типа в правом верхнем углу превью
                 Surface(
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                     shape = RoundedCornerShape(bottomStart = 6.dp, topEnd = 8.dp),
@@ -139,7 +144,6 @@ fun DownloadItemCard(
 
             Spacer(Modifier.width(12.dp))
 
-            // --- Текст ---
             Column(Modifier.weight(1f)) {
                 Text(
                     item.title,
@@ -197,7 +201,6 @@ fun DownloadItemCard(
                 }
             }
 
-            // --- Кнопки: вертикально, компактно ---
             if (!selectionMode) {
                 Spacer(Modifier.width(4.dp))
                 Column(
@@ -215,7 +218,6 @@ fun DownloadItemCard(
     }
 }
 
-/** Компактная иконка-кнопка 32dp без лишних отступов. */
 @Composable
 private fun CardActionButton(emoji: String, onClick: () -> Unit) {
     IconButton(
