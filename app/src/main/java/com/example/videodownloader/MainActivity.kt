@@ -25,8 +25,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.videodownloader.data.settings.BadgeMode
 import com.example.videodownloader.data.settings.SettingsRepository
+import com.example.videodownloader.data.settings.ThemeMode
 import com.example.videodownloader.ui.screens.*
 import com.example.videodownloader.ui.theme.VideoDownloaderTheme
 import com.example.videodownloader.ui.viewmodel.DownloadViewModel
@@ -99,7 +99,10 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            VideoDownloaderTheme {
+            val settings = remember { SettingsRepository(this) }
+            val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
+
+            VideoDownloaderTheme(themeMode = themeMode) {
                 if (needsMediaPermission.value) {
                     AlertDialog(
                         onDismissRequest = { needsMediaPermission.value = false },
@@ -203,7 +206,8 @@ private fun VideoDownloaderRoot(
     val active by vm.activeItems.collectAsState()
     val completed by vm.completedItems.collectAsState()
 
-    val badgeMode by settings.badgeMode.collectAsState(initial = BadgeMode.OFF)
+    val badgeQueue by settings.badgeQueue.collectAsState(initial = false)
+    val badgeTotal by settings.badgeTotal.collectAsState(initial = false)
 
     LaunchedEffect(Unit) {
         delay(800)
@@ -214,11 +218,12 @@ private fun VideoDownloaderRoot(
         bottomBar = {
             NavigationBar {
                 tabs.forEachIndexed { i, tab ->
-                    val isDownloadsTab = i == 1
-                    val badgeCount = when (badgeMode) {
-                        BadgeMode.OFF -> null
-                        BadgeMode.QUEUE -> if (isDownloadsTab) active.size else null
-                        BadgeMode.TOTAL -> if (isDownloadsTab) completed.size else null
+                    // Главная (i=0) — счётчик очереди (если включён)
+                    // Загрузки (i=1) — счётчик всего (если включён)
+                    val badgeCount: Int? = when {
+                        i == 0 && badgeQueue -> active.size
+                        i == 1 && badgeTotal -> completed.size
+                        else -> null
                     }
 
                     NavigationBarItem(
@@ -267,7 +272,10 @@ private fun VideoDownloaderRoot(
                     onRetry = vm::retry,
                     onRescan = vm::rescanFolder
                 )
-                else -> SettingsScreen(onChooseFolder)
+                else -> SettingsScreen(
+                    onChooseFolder = onChooseFolder,
+                    vm = vm
+                )
             }
         }
     }
