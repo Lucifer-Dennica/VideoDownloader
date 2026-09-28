@@ -218,8 +218,6 @@ private fun VideoDownloaderRoot(
         bottomBar = {
             NavigationBar {
                 tabs.forEachIndexed { i, tab ->
-                    // Главная (i=0) — счётчик очереди (если включён)
-                    // Загрузки (i=1) — счётчик всего (если включён)
                     val badgeCount: Int? = when {
                         i == 0 && badgeQueue -> active.size
                         i == 1 && badgeTotal -> completed.size
@@ -263,6 +261,7 @@ private fun VideoDownloaderRoot(
                     activeItems = active,
                     onDownloadVideo = { vm.enqueue(it, audio = false) },
                     onDownloadAudio = { vm.enqueue(it, audio = true) },
+                    onDownloadMany = { vm.enqueueMany(it, audio = false) },
                     onDelete = vm::delete
                 )
                 1 -> DownloadsScreen(
