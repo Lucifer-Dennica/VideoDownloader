@@ -34,6 +34,7 @@ fun DownloadItemCard(
     onOpen: (DownloadEntity) -> Unit,
     onOpenFolder: (DownloadEntity) -> Unit,
     onShare: (DownloadEntity) -> Unit,
+    onRetry: (DownloadEntity) -> Unit,
     onLongClick: () -> Unit,
     onToggleSelect: () -> Unit
 ) {
@@ -46,7 +47,6 @@ fun DownloadItemCard(
     val isCarousel = item.type == "PHOTOS"
     val isAudio = item.type == "AUDIO"
 
-    // Кэшируем модель для Coil
     val thumbModel: Any? = remember(item.thumbnailUrl) {
         val t = item.thumbnailUrl ?: return@remember null
         when {
@@ -98,7 +98,6 @@ fun DownloadItemCard(
                     AsyncImage(
                         model = ImageRequest.Builder(context)
                             .data(thumbModel)
-                            // ⚠️ Ключевой фикс: декодируем в нужном размере, не в оригинале
                             .size(300, 170)
                             .allowHardware(true)
                             .build(),
@@ -207,9 +206,14 @@ fun DownloadItemCard(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    if (item.status == "COMPLETED") {
-                        CardActionButton("📁") { onOpenFolder(item) }
-                        CardActionButton("📤") { onShare(item) }
+                    when (item.status) {
+                        "COMPLETED" -> {
+                            CardActionButton("📁") { onOpenFolder(item) }
+                            CardActionButton("📤") { onShare(item) }
+                        }
+                        "ERROR" -> {
+                            CardActionButton("🔄") { onRetry(item) }
+                        }
                     }
                     CardActionButton("🗑", onDelete)
                 }
