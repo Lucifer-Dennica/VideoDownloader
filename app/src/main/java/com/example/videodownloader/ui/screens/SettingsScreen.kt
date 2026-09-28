@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Upload
@@ -29,17 +30,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkManager
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.videodownloader.BuildConfig
-import com.example.videodownloader.data.settings.BadgeMode
+import com.example.videodownloader.data.repository.DownloadRepository
 import com.example.videodownloader.data.settings.SettingsRepository
+import com.example.videodownloader.data.settings.ThemeMode
+import com.example.videodownloader.ui.viewmodel.DownloadViewModel
 import com.example.videodownloader.util.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
 
 @Composable
-fun SettingsScreen(onChooseFolder: () -> Unit) {
+fun SettingsScreen(
+    onChooseFolder: () -> Unit,
+    vm: DownloadViewModel = viewModel()
+) {
     val context = LocalContext.current
     val settings = remember { SettingsRepository(context) }
     val scope = rememberCoroutineScope()
@@ -49,12 +57,21 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var showRulesDialog by remember { mutableStateOf(false) }
     var showSecurityDialog by remember { mutableStateOf(false) }
-    var showBadgeDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
 
     val audioOnly by settings.audioOnly.collectAsState(initial = false)
     val autoPaste by settings.autoPaste.collectAsState(initial = false)
     val autoDownload by settings.autoDownload.collectAsState(initial = false)
-    val badgeMode by settings.badgeMode.collectAsState(initial = BadgeMode.OFF)
+    val themeMode by settings.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
+    val badgeQueue by settings.badgeQueue.collectAsState(initial = false)
+    val badgeTotal by settings.badgeTotal.collectAsState(initial = false)
+
+    val stats by vm.statistics.collectAsState()
+
+    // Пересчитываем статистику при входе на экран
+    LaunchedEffect(Unit) {
+        vm.loadStatistics()
+    }
 
     val cookiesPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -92,28 +109,28 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
         return
     }
 
-    if (showBadgeDialog) {
+    if (showThemeDialog) {
         AlertDialog(
-            onDismissRequest = { showBadgeDialog = false },
-            title = { Text("Счётчик на панели") },
+            onDismissRequest = { showThemeDialog = false },
+            title = { Text("Тема оформления") },
             text = {
                 Column {
-                    BadgeMode.entries.forEach { mode ->
+                    ThemeMode.entries.forEach { mode ->
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    scope.launch { settings.setBadgeMode(mode) }
-                                    showBadgeDialog = false
+                                    scope.launch { settings.setThemeMode(mode) }
+                                    showThemeDialog = false
                                 }
                                 .padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = badgeMode == mode,
+                                selected = themeMode == mode,
                                 onClick = {
-                                    scope.launch { settings.setBadgeMode(mode) }
-                                    showBadgeDialog = false
+                                    scope.launch { settings.setThemeMode(mode) }
+                                    showThemeDialog = false
                                 }
                             )
                             Spacer(Modifier.width(8.dp))
@@ -123,7 +140,7 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showBadgeDialog = false }) { Text("Закрыть") }
+                TextButton(onClick = { showThemeDialog = false }) { Text("Закрыть") }
             }
         )
     }
@@ -217,10 +234,45 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
         SectionHeader("Интерфейс")
 
         SettingItem(
+            icon = Icons.Default.Palette,
+            title = "Тема",
+            subtitle = themeMode.label,
+            onClick = { showThemeDialog = true }
+        )
+
+        SettingSwitch(
             icon = Icons.Default.Badge,
-            title = "Счётчик на панели",
-            subtitle = badgeMode.label,
-            onClick = { showBadgeDialog = true }
+            title = "Счётчик очереди",
+            subtitle = "Показывать на «Главной»",
+            checked = badgeQueue,
+            onCheckedChange = { scope.launch { settings.setBadgeQueue(it) } }
+        )
+
+        SettingSwitch(
+            icon = Icons.Default.Badge,
+            title = "Счётчик всего",
+            subtitle = "Показывать на «Загрузках»",
+            checked = badgeTotal,
+            onCheckedChange = { scope.launch { settings.setBadgeTotal(it) } }
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // ============ СТАТИСТИКА ============
+        SectionHeader("Статистика")
+
+        val s = stats
+        StatItem(
+            title = "Всего скачано",
+            value = s?.total?.toString() ?: "…"
+        )
+        StatItem(
+            title = "За последние 30 дней",
+            value = s?.thisMonth?.toString() ?: "…"
+        )
+        StatItem(
+            title = "Общий размер",
+            value = s?.let { formatSize(it.totalSizeBytes) } ?: "…"
         )
 
         Spacer(Modifier.height(16.dp))
@@ -431,6 +483,47 @@ private fun SettingSwitch(
                 onCheckedChange = onCheckedChange
             )
         }
+    }
+}
+
+/** Строка статистики — только отображение, без действия. */
+@Composable
+private fun StatItem(title: String, value: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Row(
+            Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+private fun formatSize(bytes: Long): String {
+    if (bytes <= 0) return "0 Б"
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1 -> String.format(Locale.US, "%.2f ГБ", gb)
+        mb >= 1 -> String.format(Locale.US, "%.1f МБ", mb)
+        kb >= 1 -> String.format(Locale.US, "%.0f КБ", kb)
+        else -> "$bytes Б"
     }
 }
 
