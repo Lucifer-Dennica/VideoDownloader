@@ -10,7 +10,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -80,9 +79,7 @@ fun HomeScreen(
 
         // ---- Статус валидации ----
         when {
-            !hasText -> {
-                // Ничего не показываем, поле пустое
-            }
+            !hasText -> Unit
             parsedList.isEmpty() -> {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
@@ -97,18 +94,22 @@ fun HomeScreen(
                 }
             }
             parsedList.size == 1 -> {
-                AssistChip(onClick = {}, label = { Text("Источник: ${parsedList.first().service}") })
+                AssistChip(
+                    onClick = {},
+                    label = { Text("Источник: ${parsedList.first().service}") }
+                )
             }
             else -> {
+                val servicesText = parsedList
+                    .map { it.service }
+                    .distinct()
+                    .joinToString(", ")
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
                     shape = MaterialTheme.shapes.small
                 ) {
                     Text(
-                        "Найдено ${parsedList.size} ссылок: " +
-                        parsedList.joinToString(", ") { it.service }.distinct().takeIf { it.isNotBlank() }.orEmpty().let { _ ->
-                            parsedList.map { it.service }.distinct().joinToString(", ")
-                        },
+                        "Найдено ${parsedList.size} ссылок: $servicesText",
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -117,7 +118,7 @@ fun HomeScreen(
             }
         }
 
-        // ---- Кнопки скачивания ----
+        // ---- Кнопки ----
         val isMulti = parsedList.size >= 2
 
         if (audioOnly) {
@@ -159,10 +160,8 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    when {
-                        isMulti -> "🎬 Скачать все (${parsedList.size})"
-                        else -> "🎬 Скачать"
-                    }
+                    if (isMulti) "🎬 Скачать все (${parsedList.size})"
+                    else "🎬 Скачать"
                 )
             }
         }
@@ -211,8 +210,10 @@ private fun ActiveDownloadCard(item: DownloadEntity, onDelete: () -> Unit) {
                     )
                 }
                 "DOWNLOADING" -> {
-                    Text("⬇️ Скачивание ${item.progress}%",
-                        style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "⬇️ Скачивание ${item.progress}%",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     Spacer(Modifier.height(4.dp))
                     LinearProgressIndicator(
                         progress = { item.progress / 100f },
