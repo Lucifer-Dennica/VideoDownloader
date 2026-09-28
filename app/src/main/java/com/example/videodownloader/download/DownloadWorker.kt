@@ -2,16 +2,21 @@ package com.example.videodownloader.download
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.example.videodownloader.MainActivity
 import com.example.videodownloader.data.repository.DownloadRepository
 import com.example.videodownloader.data.settings.VideoQuality
 import org.json.JSONObject
@@ -69,7 +74,11 @@ class DownloadWorker(
                         error = null
                     ))
                 }
-                showNotification(id, "✅ ${resolved.imageUrls.size} фото скачано", 100, ongoing = false)
+                showNotification(
+                    id, "✅ ${resolved.imageUrls.size} фото скачано", 100, ongoing = false,
+                    clickUri = result.firstUri?.let { Uri.parse(it) },
+                    clickMime = "image/*"
+                )
                 cancelNotificationDelayed(id)
                 Result.success(workDataOf(KEY_FILE to (result.firstUri ?: "")))
             } else {
@@ -108,7 +117,9 @@ class DownloadWorker(
                 showNotification(
                     id,
                     if (audioOnly) "✅ Аудио скачано" else "✅ Видео скачано",
-                    100, ongoing = false
+                    100, ongoing = false,
+                    clickUri = buildClickUri(savedPath),
+                    clickMime = mimeFromExt(extension, audioOnly)
                 )
                 cancelNotificationDelayed(id)
                 Result.success(workDataOf(KEY_FILE to savedPath))
@@ -120,6 +131,41 @@ class DownloadWorker(
             }
             showNotification(id, "❌ Ошибка: ${e.message}", 0, ongoing = false)
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Ошибка")))
+        }
+    }
+
+    /** Из savedPath делает content URI, который можно открыть плеером. */
+    private fun buildClickUri(savedPath: String): Uri? {
+        return try {
+            if (savedPath.startsWith("content://")) {
+                Uri.parse(savedPath)
+            } else {
+                val file = File(savedPath)
+                if (!file.exists()) null
+                else FileProvider.getUriForFile(
+                    applicationContext,
+                    "${applicationContext.packageName}.fileprovider",
+                    file
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "buildClickUri failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun mimeFromExt(ext: String, audioOnly: Boolean): String = when {
+        audioOnly -> when (ext) {
+            "mp3" -> "audio/mpeg"
+            "m4a" -> "audio/mp4"
+            "aac" -> "audio/aac"
+            "ogg" -> "audio/ogg"
+            "weba" -> "audio/webm"
+            else -> "audio/mpeg"
+        }
+        else -> when (ext) {
+            "webm" -> "video/webm"
+            else -> "video/mp4"
         }
     }
 
@@ -266,11 +312,9 @@ class DownloadWorker(
                 lower.endsWith(".mov") || lower.endsWith(".m4v")) {
                 throw Exception("Аудио из прямых ссылок не поддерживается")
             }
-            // TikTok — через tikwm (yt-dlp не справляется)
             if (lower.contains("tiktok.com")) {
                 return resolveTikTokAudio(url)
             }
-            // Остальные — через yt-dlp
             return resolveViaYtdlp(url, quality, audioOnly = true)
         }
 
@@ -298,10 +342,6 @@ class DownloadWorker(
         }
     }
 
-    /**
-     * Аудио из TikTok через tikwm.
-     * Возвращает поле `music` — это аудиодорожка видео (mp3 или m4a).
-     */
     private fun resolveTikTokAudio(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
         Log.d(TAG, "tikwm audio GET $api")
@@ -358,11 +398,12 @@ class DownloadWorker(
             }
         }
 
-        val video = data.optString("play").ifBlank { null }
-            ?: data.optString("hdplay").ifBlank { null }
+        val hdPlay = data.optString("hdplay").ifBlank { null }
+        val sdPlay = data.optString("play").ifBlank { null }
+        val video = if (hd == 1) hdPlay ?: sdPlay else sdPlay ?: hdPlay
             ?: throw Exception("tikwm: нет ни видео, ни картинок")
 
-        Log.d(TAG, "TikTok OK (видео, hd=$hd)")
+        Log.d(TAG, "TikTok OK: hd=$hd")
         return Resolved(videoUrl = video, thumbnail = cover)
     }
 
@@ -611,13 +652,27 @@ class DownloadWorker(
         }
     }
 
-    private fun showNotification(id: Long, text: String, progress: Int, ongoing: Boolean) {
+    /**
+     * Уведомление с прогрессом или результат.
+     * Если clickUri задан — тап открывает файл; иначе открывает приложение.
+     */
+    private fun showNotification(
+        id: Long,
+        text: String,
+        progress: Int,
+        ongoing: Boolean,
+        clickUri: Uri? = null,
+        clickMime: String? = null
+    ) {
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channelId = "downloads"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(channelId, "Загрузки", NotificationManager.IMPORTANCE_LOW)
             manager.createNotificationChannel(channel)
         }
+
+        val contentIntent = buildContentIntent(id, clickUri, clickMime)
+
         val notif = NotificationCompat.Builder(applicationContext, channelId)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("VideoDownloader")
@@ -625,8 +680,37 @@ class DownloadWorker(
             .setProgress(100, progress, progress == 0)
             .setOngoing(ongoing)
             .setAutoCancel(!ongoing)
+            .setContentIntent(contentIntent)
             .build()
         manager.notify(id.toInt(), notif)
+    }
+
+    private fun buildContentIntent(id: Long, uri: Uri?, mime: String?): PendingIntent {
+        val intent = if (uri != null && mime != null) {
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        } else {
+            Intent(applicationContext, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+        }
+
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+
+        return PendingIntent.getActivity(
+            applicationContext,
+            id.toInt(),
+            intent,
+            flags
+        )
     }
 
     private fun cancelNotificationDelayed(id: Long) {
