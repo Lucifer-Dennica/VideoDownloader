@@ -15,7 +15,9 @@ import com.example.videodownloader.data.settings.VideoQuality
 import com.example.videodownloader.download.DownloadWorker
 import com.example.videodownloader.util.UrlParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -26,6 +28,9 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = SettingsRepository(app)
 
     @Volatile private var isScanning = false
+
+    private val _statistics = MutableStateFlow<DownloadRepository.Statistics?>(null)
+    val statistics = _statistics.asStateFlow()
 
     val items = repo.items.stateIn(
         viewModelScope,
@@ -67,11 +72,16 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Пересчитать статистику (для экрана настроек). */
+    fun loadStatistics() = viewModelScope.launch(Dispatchers.IO) {
+        try {
+            _statistics.value = repo.getStatistics()
+        } catch (_: Exception) { }
+    }
+
     fun enqueue(raw: String, audio: Boolean = false) {
         val parsed = UrlParser.parse(raw) ?: return
         viewModelScope.launch {
-            // Качество скрыто из UI — всегда MAX.
-            // Когда вернём UI, здесь будет settings.getVideoQuality().
             val quality = VideoQuality.MAX
             val title = when {
                 audio -> "Аудио • ${parsed.service}"
@@ -87,10 +97,8 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Повторить загрузку для упавшей записи. */
     fun retry(item: DownloadEntity) = viewModelScope.launch {
         val audio = item.type == "AUDIO"
-        // Сбрасываем статус
         repo.update(item.copy(status = "QUEUED", error = null, progress = 0))
         enqueueWorker(
             id = item.id,
@@ -115,7 +123,7 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
                     DownloadWorker.KEY_AUDIO to audio
                 )
             )
-            .addTag(id.toString())  // ← фикс: теперь cancelAllWorkByTag реально находит задачу
+            .addTag(id.toString())
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
