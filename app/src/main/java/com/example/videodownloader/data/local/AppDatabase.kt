@@ -18,18 +18,27 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads WHERE folderPath = :path LIMIT 1")
     suspend fun getByFolderPath(path: String): DownloadEntity?
 
-    /** Все непустые filePath — для O(1) проверки дубликатов при скане. */
     @Query("SELECT filePath FROM downloads WHERE filePath IS NOT NULL")
     suspend fun getAllFilePaths(): List<String>
 
-    /** Все непустые folderPath — для проверки альбомов. */
     @Query("SELECT folderPath FROM downloads WHERE folderPath IS NOT NULL")
     suspend fun getAllFolderPaths(): List<String>
+
+    /** Сколько всего скачано (успешно завершённых). */
+    @Query("SELECT COUNT(*) FROM downloads WHERE status = 'COMPLETED'")
+    suspend fun getCompletedCount(): Int
+
+    /** Сколько скачано с :sinceMs. */
+    @Query("SELECT COUNT(*) FROM downloads WHERE status = 'COMPLETED' AND createdAt >= :sinceMs")
+    suspend fun getCompletedCountSince(sinceMs: Long): Int
+
+    /** Пути завершённых загрузок — чтобы посчитать общий размер. */
+    @Query("SELECT filePath FROM downloads WHERE status = 'COMPLETED' AND filePath IS NOT NULL")
+    suspend fun getCompletedFilePaths(): List<String>
 
     @Insert
     suspend fun insert(item: DownloadEntity): Long
 
-    /** Пакетная вставка — один transaction, один emit Flow. */
     @Insert
     suspend fun insertAll(items: List<DownloadEntity>): List<Long>
 
