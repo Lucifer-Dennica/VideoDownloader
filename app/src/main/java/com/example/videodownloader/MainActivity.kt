@@ -22,8 +22,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.videodownloader.data.settings.BadgeMode
+import com.example.videodownloader.data.settings.SettingsRepository
 import com.example.videodownloader.ui.screens.*
 import com.example.videodownloader.ui.theme.VideoDownloaderTheme
 import com.example.videodownloader.ui.viewmodel.DownloadViewModel
@@ -185,6 +188,9 @@ private fun VideoDownloaderRoot(
     onChooseFolder: () -> Unit,
     vm: DownloadViewModel = viewModel()
 ) {
+    val context = LocalContext.current
+    val settings = remember { SettingsRepository(context) }
+
     val tabs = listOf(
         TabItem("Главная", Icons.Default.Home),
         TabItem("Загрузки", Icons.Default.Download),
@@ -197,7 +203,8 @@ private fun VideoDownloaderRoot(
     val active by vm.activeItems.collectAsState()
     val completed by vm.completedItems.collectAsState()
 
-    // Автоскан после первой отрисовки UI
+    val badgeMode by settings.badgeMode.collectAsState(initial = BadgeMode.OFF)
+
     LaunchedEffect(Unit) {
         delay(800)
         vm.autoScan()
@@ -207,12 +214,33 @@ private fun VideoDownloaderRoot(
         bottomBar = {
             NavigationBar {
                 tabs.forEachIndexed { i, tab ->
+                    val isDownloadsTab = i == 1
+                    val badgeCount = when (badgeMode) {
+                        BadgeMode.OFF -> null
+                        BadgeMode.QUEUE -> if (isDownloadsTab) active.size else null
+                        BadgeMode.TOTAL -> if (isDownloadsTab) completed.size else null
+                    }
+
                     NavigationBarItem(
                         selected = pagerState.currentPage == i,
                         onClick = {
                             scope.launch { pagerState.animateScrollToPage(i) }
                         },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                        icon = {
+                            if (badgeCount != null) {
+                                BadgedBox(
+                                    badge = {
+                                        Badge {
+                                            Text(badgeCount.toString())
+                                        }
+                                    }
+                                ) {
+                                    Icon(tab.icon, contentDescription = tab.label)
+                                }
+                            } else {
+                                Icon(tab.icon, contentDescription = tab.label)
+                            }
+                        },
                         label = { Text(tab.label) }
                     )
                 }
@@ -236,6 +264,7 @@ private fun VideoDownloaderRoot(
                     items = completed,
                     onDelete = vm::delete,
                     onDeleteMany = vm::deleteMany,
+                    onRetry = vm::retry,
                     onRescan = vm::rescanFolder
                 )
                 else -> SettingsScreen(onChooseFolder)
