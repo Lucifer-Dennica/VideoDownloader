@@ -3,6 +3,7 @@ package com.example.videodownloader.data.settings
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -11,7 +12,6 @@ import kotlinx.coroutines.flow.map
 
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
-/** Качество скачиваемого видео. */
 enum class VideoQuality(
     val label: String,
     val cobaltValue: String,
@@ -38,6 +38,7 @@ class SettingsRepository(context: Context) {
         val AUDIO_ONLY = booleanPreferencesKey("audio_only")
         val AUTO_PASTE = booleanPreferencesKey("auto_paste")
         val AUTO_DOWNLOAD = booleanPreferencesKey("auto_download")
+        val LAST_SCAN = longPreferencesKey("last_scan")
     }
 
     val videoQuality: Flow<VideoQuality> = appContext.settingsDataStore.data
@@ -68,7 +69,14 @@ class SettingsRepository(context: Context) {
         appContext.settingsDataStore.edit { it[Keys.AUTO_DOWNLOAD] = value }
     }
 
-    /** Для воркера: быстрое чтение текущих значений. */
     suspend fun getVideoQuality(): VideoQuality = videoQuality.first()
     suspend fun getAudioOnly(): Boolean = audioOnly.first()
+
+    /** Unix ms. 0 = полный скан. */
+    suspend fun getLastScanTime(): Long =
+        appContext.settingsDataStore.data.map { it[Keys.LAST_SCAN] ?: 0L }.first()
+
+    suspend fun setLastScanTime(value: Long) {
+        appContext.settingsDataStore.edit { it[Keys.LAST_SCAN] = value }
+    }
 }
