@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
 import com.example.videodownloader.data.local.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -77,27 +78,48 @@ class DownloadRepository(context: Context) {
         }
     }
 
-    suspend fun scanFolder() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
-        scanVideos()
-        scanAudio()
-        scanPhotos()
+    /**
+     * Инкрементальный скан MediaStore.
+     * @param sinceMs если > 0 — берём только файлы новее этой метки (инкремент).
+     *                если 0 — полный скан (кнопка «Обновить»).
+     */
+    suspend fun scanFolder(sinceMs: Long = 0L) = withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@withContext
+        val start = System.currentTimeMillis()
+        Log.d(TAG, "scanFolder: since=$sinceMs")
+
+        val existingFiles = dao.getAllFilePaths().toHashSet()
+        val existingFolders = dao.getAllFolderPaths().toHashSet()
+
+        scanVideos(sinceMs, existingFiles)
+        scanAudio(sinceMs, existingFiles)
+        scanPhotos(sinceMs, existingFolders)
+
+        Log.d(TAG, "scanFolder done in ${System.currentTimeMillis() - start}ms")
     }
 
-    private suspend fun scanVideos() {
+    // ---------- ВИДЕО ----------
+    private suspend fun scanVideos(sinceMs: Long, existing: Set<String>) {
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DISPLAY_NAME,
             MediaStore.Video.Media.DATE_ADDED,
             MediaStore.Video.Media.RELATIVE_PATH
         )
-        val selection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
-        val selectionArgs = arrayOf("%DCIM/VideoDownloader%")
+        val baseSel = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
+        val (selection, args) = if (sinceMs > 0) {
+            "$baseSel AND ${MediaStore.Video.Media.DATE_ADDED} > ?" to
+                arrayOf("%DCIM/VideoDownloader%", (sinceMs / 1000).toString())
+        } else {
+            baseSel to arrayOf("%DCIM/VideoDownloader%")
+        }
+
+        val batch = mutableListOf<DownloadEntity>()
 
         try {
             appContext.contentResolver.query(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                projection, selection, selectionArgs,
+                projection, selection, args,
                 "${MediaStore.Video.Media.DATE_ADDED} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
@@ -110,20 +132,18 @@ class DownloadRepository(context: Context) {
                     val name = cursor.getString(nameCol) ?: "video.mp4"
                     val dateSec = cursor.getLong(dateCol)
                     val relativePath = cursor.getString(pathCol) ?: ""
-
                     if (relativePath.contains("/Photos/")) continue
 
                     val uri = ContentUris.withAppendedId(
                         MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId
                     )
                     val uriStr = uri.toString()
-
-                    if (dao.getByPath(uriStr) != null) continue
+                    if (existing.contains(uriStr)) continue
 
                     val service = detectServiceFromPath(relativePath)
                     val thumbPath = generateThumbnail(mediaId, name)
 
-                    dao.insert(
+                    batch.add(
                         DownloadEntity(
                             url = "local://$service",
                             title = "Видео • $service",
@@ -136,32 +156,40 @@ class DownloadRepository(context: Context) {
                             createdAt = dateSec * 1000
                         )
                     )
-                    Log.d(TAG, "scanVideos: $name → $service")
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "scanVideos error: ${e.message}")
+            return
+        }
+
+        if (batch.isNotEmpty()) {
+            dao.insertAll(batch)
+            Log.d(TAG, "scanVideos: inserted ${batch.size}")
         }
     }
 
-    /**
-     * Аудио теперь лежит в Music/VideoDownloader/{service}/Audio/.
-     * Фильтр — просто %VideoDownloader%, чтобы ловилось независимо от корневой папки.
-     */
-    private suspend fun scanAudio() {
+    // ---------- АУДИО ----------
+    private suspend fun scanAudio(sinceMs: Long, existing: Set<String>) {
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
-            MediaStore.Audio.Media.DISPLAY_NAME,
             MediaStore.Audio.Media.DATE_ADDED,
             MediaStore.Audio.Media.RELATIVE_PATH
         )
-        val selection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
-        val selectionArgs = arrayOf("%VideoDownloader%")
+        val baseSel = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
+        val (selection, args) = if (sinceMs > 0) {
+            "$baseSel AND ${MediaStore.Audio.Media.DATE_ADDED} > ?" to
+                arrayOf("%VideoDownloader%", (sinceMs / 1000).toString())
+        } else {
+            baseSel to arrayOf("%VideoDownloader%")
+        }
+
+        val batch = mutableListOf<DownloadEntity>()
 
         try {
             appContext.contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                projection, selection, selectionArgs,
+                projection, selection, args,
                 "${MediaStore.Audio.Media.DATE_ADDED} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
@@ -172,26 +200,22 @@ class DownloadRepository(context: Context) {
                     val mediaId = cursor.getLong(idCol)
                     val dateSec = cursor.getLong(dateCol)
                     val relativePath = cursor.getString(pathCol) ?: ""
-
                     if (!relativePath.contains("/Audio/")) continue
 
                     val uri = ContentUris.withAppendedId(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, mediaId
                     )
                     val uriStr = uri.toString()
-
-                    if (dao.getByPath(uriStr) != null) continue
+                    if (existing.contains(uriStr)) continue
 
                     val service = detectServiceFromPath(relativePath)
-                    val folderPath = relativePath.trimEnd('/')
-
-                    dao.insert(
+                    batch.add(
                         DownloadEntity(
                             url = "local://$service",
                             title = "Аудио • $service",
                             filePath = uriStr,
                             thumbnailUrl = null,
-                            folderPath = folderPath,
+                            folderPath = relativePath.trimEnd('/'),
                             type = "AUDIO",
                             itemCount = 1,
                             status = "COMPLETED",
@@ -199,29 +223,58 @@ class DownloadRepository(context: Context) {
                             createdAt = dateSec * 1000
                         )
                     )
-                    Log.d(TAG, "scanAudio: $relativePath → $service")
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "scanAudio error: ${e.message}")
+            return
+        }
+
+        if (batch.isNotEmpty()) {
+            dao.insertAll(batch)
+            Log.d(TAG, "scanAudio: inserted ${batch.size}")
         }
     }
 
+    // ---------- ПРЕВЬЮ ----------
+    /**
+     * Сначала пробуем системное превью (ContentResolver.loadThumbnail, API 29+).
+     * Он быстрый — Android уже сгенерил превью при сохранении видео.
+     * Fallback — MediaMetadataRetriever (медленно, но работает везде).
+     * Файлы — в filesDir (не чистится системой в отличие от cacheDir).
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
     private suspend fun generateThumbnail(mediaId: Long, name: String): String? =
         withContext(Dispatchers.IO) {
+            val thumbsDir = File(appContext.filesDir, "thumbs").apply { mkdirs() }
+            val thumbFile = File(thumbsDir, "thumb_$mediaId.jpg")
+            if (thumbFile.exists()) return@withContext thumbFile.absolutePath
+
+            val videoUri = ContentUris.withAppendedId(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId
+            )
+
+            // Быстрый путь: системное превью
+            try {
+                val size = android.util.Size(320, 180)
+                val bmp = appContext.contentResolver.loadThumbnail(videoUri, size, null)
+                FileOutputStream(thumbFile).use { out ->
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)
+                }
+                bmp.recycle()
+                return@withContext thumbFile.absolutePath
+            } catch (e: Exception) {
+                Log.d(TAG, "loadThumbnail failed for $name: ${e.message}, fallback")
+            }
+
+            // Медленный fallback
             val retriever = MediaMetadataRetriever()
             try {
-                val uri = ContentUris.withAppendedId(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId
-                )
-                retriever.setDataSource(appContext, uri)
+                retriever.setDataSource(appContext, videoUri)
                 val bitmap = retriever.getFrameAtTime(
                     1_000_000,
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC
                 ) ?: return@withContext null
-
-                val thumbsDir = File(appContext.cacheDir, "thumbs").apply { mkdirs() }
-                val thumbFile = File(thumbsDir, "thumb_${mediaId}.jpg")
                 FileOutputStream(thumbFile).use { out ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
                 }
@@ -235,21 +288,27 @@ class DownloadRepository(context: Context) {
             }
         }
 
-    private suspend fun scanPhotos() {
+    // ---------- ФОТО ----------
+    private suspend fun scanPhotos(sinceMs: Long, existingFolders: Set<String>) {
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DATE_ADDED,
             MediaStore.Images.Media.RELATIVE_PATH
         )
-        val selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
-        val selectionArgs = arrayOf("%DCIM/VideoDownloader%")
+        val baseSel = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+        val (selection, args) = if (sinceMs > 0) {
+            "$baseSel AND ${MediaStore.Images.Media.DATE_ADDED} > ?" to
+                arrayOf("%DCIM/VideoDownloader%", (sinceMs / 1000).toString())
+        } else {
+            baseSel to arrayOf("%DCIM/VideoDownloader%")
+        }
 
         val albums = mutableMapOf<String, MutableList<Pair<String, Long>>>()
 
         try {
             appContext.contentResolver.query(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                projection, selection, selectionArgs,
+                projection, selection, args,
                 "${MediaStore.Images.Media.DATE_ADDED} DESC"
             )?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
@@ -264,7 +323,6 @@ class DownloadRepository(context: Context) {
                     val uri = ContentUris.withAppendedId(
                         MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId
                     )
-
                     albums.getOrPut(relativePath) { mutableListOf() }
                         .add(uri.toString() to dateSec)
                 }
@@ -274,15 +332,16 @@ class DownloadRepository(context: Context) {
             return
         }
 
+        val batch = mutableListOf<DownloadEntity>()
         for ((folder, photos) in albums) {
             if (photos.isEmpty()) continue
-            if (dao.getByFolderPath(folder) != null) continue
+            if (existingFolders.contains(folder)) continue
 
             val firstUri = photos.first().first
             val newestDate = photos.maxOf { it.second }
             val service = detectServiceFromPath(folder)
 
-            dao.insert(
+            batch.add(
                 DownloadEntity(
                     url = "local://$service",
                     title = "Фото • $service",
@@ -296,7 +355,11 @@ class DownloadRepository(context: Context) {
                     createdAt = newestDate * 1000
                 )
             )
-            Log.d(TAG, "scanPhotos: $folder → $service (${photos.size})")
+        }
+
+        if (batch.isNotEmpty()) {
+            dao.insertAll(batch)
+            Log.d(TAG, "scanPhotos: inserted ${batch.size}")
         }
     }
 
