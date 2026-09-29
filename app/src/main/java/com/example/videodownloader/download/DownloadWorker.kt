@@ -298,6 +298,7 @@ class DownloadWorker(
             lower.contains("reddit.com") -> "Reddit"
             lower.contains("pinterest.com") || lower.contains("pin.it") -> "Pinterest"
             lower.contains("snapchat.com") -> "Snapchat"
+            lower.contains("soundcloud.com") -> "SoundCloud"
             else -> "Другое"
         }
     }
@@ -326,16 +327,13 @@ class DownloadWorker(
                 resolveViaYtdlp(url, quality, audioOnly = false)
             lower.contains("instagram.com") ->
                 resolveViaYtdlp(url, quality, audioOnly = false)
+
+            // Сервисы, которые могут работать через публичные Cobalt-инстансы
             lower.contains("facebook.com") || lower.contains("fb.watch") ||
             lower.contains("vk.com") || lower.contains("twitter.com") ||
             lower.contains("x.com") || lower.contains("reddit.com") ||
             lower.contains("pinterest.com") || lower.contains("pin.it") ||
-            lower.contains("snapchat.com") || lower.contains("vimeo.com") ||
-            lower.contains("dailymotion.com") || lower.contains("twitch.tv") ||
-            lower.contains("rumble.com") || lower.contains("odysee.com") ||
-            lower.contains("soundcloud.com") || lower.contains("rutube.ru") ||
-            lower.contains("linkedin.com") || lower.contains("threads.net") ||
-            lower.contains("tumblr.com") -> resolveCobalt(url, quality)
+            lower.contains("snapchat.com") -> resolveCobalt(url, quality)
 
             lower.endsWith(".mp4") || lower.endsWith(".webm") ||
             lower.endsWith(".mov") || lower.endsWith(".m4v") -> Resolved(videoUrl = url)
@@ -344,7 +342,6 @@ class DownloadWorker(
         }
     }
 
-    /** Аудио TikTok через tikwm — под мьютексом, т.к. у tikwm лимит 1 запрос/сек. */
     private suspend fun resolveTikTokAudio(url: String): Resolved? {
         return withTikwmLock {
             val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
@@ -371,7 +368,6 @@ class DownloadWorker(
         }
     }
 
-    /** Видео TikTok через tikwm — тоже под мьютексом. */
     private suspend fun resolveTikTok(url: String, quality: VideoQuality): Resolved? {
         return withTikwmLock {
             val hd = quality.tikwmHd
@@ -415,11 +411,6 @@ class DownloadWorker(
         }
     }
 
-    /**
-     * Глобальный мьютекс для запросов к tikwm.
-     * tikwm даёт 1 запрос в секунду с одного IP — при пачке из 3+ ссылок
-     * без сериализации 2 из 3 сразу падают с "Free Api Limit".
-     */
     private suspend fun <T> withTikwmLock(block: suspend () -> T): T {
         tikwmMutex.withLock {
             val elapsed = System.currentTimeMillis() - lastTikwmCallMs
@@ -751,7 +742,6 @@ class DownloadWorker(
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         private const val YTDLP_URL = "https://ytdlp-server-production-16c0.up.railway.app/api/resolve"
 
-        // tikwm позволяет 1 запрос в секунду с IP. Сериализуем.
         private const val TIKWM_MIN_INTERVAL_MS = 1100L
         private val tikwmMutex = Mutex()
         @Volatile private var lastTikwmCallMs = 0L
