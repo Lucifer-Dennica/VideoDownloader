@@ -12,28 +12,15 @@ data class ParsedUrl(
 object UrlParser {
 
     /**
-     * Только те сервисы, которые реально работают на текущий момент.
-     * Остальные (Vimeo, Twitch, Rutube, Tumblr, Odysee, Rumble, Dailymotion,
-     * LinkedIn, Threads) убраны — они не скачиваются через публичные Cobalt-инстансы.
+     * Только те сервисы, которые реально работают на 1.7.4.
+     * Остальные (VK, Twitter, Reddit, Pinterest, Snapchat, SoundCloud,
+     * YouTube, Instagram) временно убраны — работаем над ними.
      */
     private val knownHosts = listOf(
-        // 100% работает
         "tiktok.com", "vt.tiktok.com", "vm.tiktok.com",
-        // Работает с cookies
-        "youtube.com", "youtu.be", "m.youtube.com",
-        "instagram.com",
-        // Работает нестабильно, но шансы есть
-        "facebook.com", "fb.watch", "m.facebook.com",
-        "vk.com", "m.vk.com",
-        "twitter.com", "x.com",
-        "reddit.com", "redd.it",
-        "pinterest.com", "pin.it",
-        "snapchat.com",
-        // Аудио-сервисы
-        "soundcloud.com"
+        "facebook.com", "fb.watch", "m.facebook.com"
     )
 
-    /** Одна ссылка. Возвращает null, если невалидна или сервис неизвестен. */
     fun parse(raw: String): ParsedUrl? {
         val value = raw.trim()
         if (value.isBlank()) return null
@@ -51,7 +38,6 @@ object UrlParser {
         return ParsedUrl(value, host, service, isDirectMedia)
     }
 
-    /** Все ссылки из текста (одна на строку, из заметок, смешанные). */
     fun parseAll(text: String): List<ParsedUrl> {
         if (text.isBlank()) return emptyList()
         val regex = Regex("""https?://[^\s]+""")
@@ -70,15 +56,7 @@ object UrlParser {
 
     private fun detectService(host: String): String = when {
         host.contains("tiktok") -> "TikTok"
-        host.contains("youtube") || host == "youtu.be" -> "YouTube"
-        host.contains("instagram") -> "Instagram"
         host.contains("facebook") || host == "fb.watch" -> "Facebook"
-        host.contains("vk.com") -> "VK"
-        host.contains("twitter") || host == "x.com" -> "Twitter"
-        host.contains("reddit") || host == "redd.it" -> "Reddit"
-        host.contains("pinterest") || host == "pin.it" -> "Pinterest"
-        host.contains("snapchat") -> "Snapchat"
-        host.contains("soundcloud") -> "SoundCloud"
         else -> host
     }
 }
