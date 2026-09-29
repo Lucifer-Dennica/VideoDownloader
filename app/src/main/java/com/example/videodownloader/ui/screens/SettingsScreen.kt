@@ -1,5 +1,7 @@
 package com.example.videodownloader.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,19 +12,22 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,7 +46,6 @@ import com.example.videodownloader.util.UpdateChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.io.File
 import java.util.Locale
 
 @Composable
@@ -71,25 +75,6 @@ fun SettingsScreen(
 
     LaunchedEffect(Unit) {
         vm.loadStatistics()
-    }
-
-    val cookiesPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let {
-            try {
-                val inputStream = context.contentResolver.openInputStream(it)
-                val cookiesFile = File(context.filesDir, "cookies.txt")
-                inputStream?.use { input ->
-                    cookiesFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                Toast.makeText(context, "Cookies загружены", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        }
     }
 
     if (showSupportedHelp) {
@@ -259,18 +244,9 @@ fun SettingsScreen(
         SectionHeader("Статистика")
 
         val s = stats
-        StatItem(
-            title = "Всего скачано",
-            value = s?.total?.toString() ?: "…"
-        )
-        StatItem(
-            title = "За последние 30 дней",
-            value = s?.thisMonth?.toString() ?: "…"
-        )
-        StatItem(
-            title = "Общий размер",
-            value = s?.let { formatSize(it.totalSizeBytes) } ?: "…"
-        )
+        StatItem(title = "Всего скачано", value = s?.total?.toString() ?: "…")
+        StatItem(title = "За последние 30 дней", value = s?.thisMonth?.toString() ?: "…")
+        StatItem(title = "Общий размер", value = s?.let { formatSize(it.totalSizeBytes) } ?: "…")
 
         Spacer(Modifier.height(16.dp))
 
@@ -309,6 +285,46 @@ fun SettingsScreen(
             title = "Поддерживаемые сервисы",
             subtitle = "Что работает сейчас, что в разработке",
             onClick = { showSupportedHelp = true }
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // ================= ОБРАТНАЯ СВЯЗЬ И ПОДДЕРЖКА =================
+        SectionHeader("Обратная связь")
+
+        SettingItem(
+            icon = Icons.Default.Favorite,
+            title = "Поддержать разработчика",
+            subtitle = "Добровольный донат на DonationAlerts",
+            onClick = { openUrl(context, SUPPORT_URL) }
+        )
+
+        SettingItem(
+            icon = Icons.Default.Share,
+            title = "Поделиться приложением",
+            subtitle = "Отправить ссылку другу",
+            onClick = { shareApp(context) }
+        )
+
+        SettingItem(
+            icon = Icons.Default.Star,
+            title = "Оценить в RuStore",
+            subtitle = "Поставьте оценку — это помогает проекту",
+            onClick = { openUrl(context, RUSTORE_URL) }
+        )
+
+        SettingItem(
+            icon = Icons.AutoMirrored.Filled.Send,
+            title = "Telegram-канал",
+            subtitle = TELEGRAM_DISPLAY,
+            onClick = { openUrl(context, TELEGRAM_URL) }
+        )
+
+        SettingItem(
+            icon = Icons.Default.Email,
+            title = "Написать разработчику",
+            subtitle = SUPPORT_EMAIL,
+            onClick = { sendEmail(context) }
         )
 
         Spacer(Modifier.height(16.dp))
@@ -372,6 +388,76 @@ fun SettingsScreen(
         )
     }
 }
+
+// ================= КОНСТАНТЫ ССЫЛОК =================
+
+// Ссылка на страницу донатов DonationAlerts
+private const val SUPPORT_URL = "https://www.donationalerts.com/r/lucifer_dennica"
+
+// ⚠️ ЗАМЕНИТЬ после публикации в RuStore:
+// Вставь реальную ссылку вида: "https://www.rustore.ru/catalog/app/com.example.videodownloader"
+private const val RUSTORE_URL = "#"
+
+// Telegram
+private const val TELEGRAM_URL = "https://t.me/Lucifer_Denicca_22142"
+private const val TELEGRAM_DISPLAY = "@Lucifer_Denicca_22142"
+
+// Почта разработчика
+private const val SUPPORT_EMAIL = "denis22142qwe@gmail.com"
+
+// ================= ХЕЛПЕРЫ =================
+
+private fun openUrl(context: android.content.Context, url: String) {
+    if (url == "#" || url.isBlank()) {
+        Toast.makeText(context, "Ссылка появится после публикации в RuStore", Toast.LENGTH_SHORT).show()
+        return
+    }
+    try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Не удалось открыть ссылку", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun shareApp(context: android.content.Context) {
+    // Если ссылка на RuStore ещё не вставлена — делимся текстом без неё
+    val hasRuStore = RUSTORE_URL != "#" && RUSTORE_URL.isNotBlank()
+    val text = if (hasRuStore) {
+        "Скачивай видео из TikTok и Facebook без водяного знака: $RUSTORE_URL"
+    } else {
+        "VideoDownloader — скачивай видео из TikTok и Facebook без водяного знака"
+    }
+
+    try {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "VideoDownloader")
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(Intent.createChooser(intent, "Поделиться"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Не удалось поделиться", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun sendEmail(context: android.content.Context) {
+    try {
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:$SUPPORT_EMAIL")
+            putExtra(Intent.EXTRA_SUBJECT, "VideoDownloader — обратная связь")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Нет почтового клиента. Напишите на $SUPPORT_EMAIL", Toast.LENGTH_LONG).show()
+    }
+}
+
+// ================= UI-КОМПОНЕНТЫ =================
 
 @Composable
 private fun SectionHeader(title: String) {
@@ -514,7 +600,6 @@ private fun formatSize(bytes: Long): String {
 
 @Composable
 private fun InfoScreen(title: String, content: String, onBack: () -> Unit) {
-    // Перехватываем системную кнопку Назад
     BackHandler(enabled = true) {
         onBack()
     }
