@@ -80,26 +80,26 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.7.4.apk
+          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.7.5.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-v1.7.4
-          path: release/VideoDownloader-v1.7.4.apk
+          name: VideoDownloader-v1.7.5
+          path: release/VideoDownloader-v1.7.5.apk
           if-no-files-found: error
 
       - name: Attach APK to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/VideoDownloader-v1.7.4.apk
+          files: release/VideoDownloader-v1.7.5.apk
           tag_name: ${{ github.event.release.tag_name }}
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Поддержка TikTok и Facebook
-            - Фикс: системная кнопка «Назад» в справке
-            - Обновлён список сервисов
+            - Кнопка «Поддержать разработчика» (DonationAlerts)
+            - Поделиться приложением / Оценить в RuStore
+            - Контакты разработчика: Telegram, email
           draft: false
           prerelease: false
