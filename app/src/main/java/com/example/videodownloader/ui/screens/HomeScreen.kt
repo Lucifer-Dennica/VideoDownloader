@@ -41,7 +41,6 @@ fun HomeScreen(
     val autoDownload by settings.autoDownload.collectAsState(initial = false)
     val audioOnly by settings.audioOnly.collectAsState(initial = false)
 
-    // ---- Автопаста из буфера ----
     DisposableEffect(lifecycleOwner, autoPaste) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME && autoPaste && link.isBlank()) {
@@ -59,7 +58,6 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ---- Автоскачивание только для ОДНОЙ ссылки ----
     LaunchedEffect(link, autoDownload, audioOnly) {
         if (!autoDownload || audioOnly) return@LaunchedEffect
         if (parsedList.size != 1) return@LaunchedEffect
@@ -73,11 +71,10 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("VideoDownloader", style = MaterialTheme.typography.headlineLarge)
-        Text("Вставьте одну или несколько ссылок — по одной на строку.")
+        Text("Вставьте ссылку из TikTok или Facebook — одну или несколько, по одной на строку.")
 
         LinkInputField(link) { link = it }
 
-        // ---- Статус валидации ----
         when {
             !hasText -> Unit
             parsedList.isEmpty() -> {
@@ -86,7 +83,7 @@ fun HomeScreen(
                     shape = MaterialTheme.shapes.small
                 ) {
                     Text(
-                        "⚠️ Не найдено ни одной поддерживаемой ссылки",
+                        "⚠️ Ссылка не поддерживается. Сейчас работаем с TikTok и Facebook.",
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -118,7 +115,6 @@ fun HomeScreen(
             }
         }
 
-        // ---- Кнопки ----
         val isMulti = parsedList.size >= 2
 
         if (audioOnly) {
