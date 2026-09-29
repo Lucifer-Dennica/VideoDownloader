@@ -290,23 +290,11 @@ class DownloadWorker(
         val lower = url.lowercase()
         return when {
             lower.contains("tiktok.com") -> "TikTok"
-            lower.contains("youtube.com") || lower.contains("youtu.be") -> "YouTube"
-            lower.contains("instagram.com") -> "Instagram"
             lower.contains("facebook.com") || lower.contains("fb.watch") -> "Facebook"
-            lower.contains("vk.com") -> "VK"
-            lower.contains("twitter.com") || lower.contains("x.com") -> "Twitter"
-            lower.contains("reddit.com") -> "Reddit"
-            lower.contains("pinterest.com") || lower.contains("pin.it") -> "Pinterest"
-            lower.contains("snapchat.com") -> "Snapchat"
-            lower.contains("soundcloud.com") -> "SoundCloud"
             else -> "Другое"
         }
     }
 
-    /**
-     * Определяет, через какой сервис тянуть ссылку.
-     * ⚠️ suspend — потому что resolveTikTok/resolveTikTokAudio под мьютексом.
-     */
     private suspend fun resolveDirectUrl(
         url: String,
         quality: VideoQuality,
@@ -322,26 +310,19 @@ class DownloadWorker(
             if (lower.contains("tiktok.com")) {
                 return resolveTikTokAudio(url)
             }
-            return resolveViaYtdlp(url, quality, audioOnly = true)
+            // Для Facebook аудио пока не поддержано
+            throw Exception("Аудио доступно только для TikTok")
         }
 
         return when {
             lower.contains("tiktok.com") -> resolveTikTok(url, quality)
-            lower.contains("youtube.com") || lower.contains("youtu.be") ->
-                resolveViaYtdlp(url, quality, audioOnly = false)
-            lower.contains("instagram.com") ->
-                resolveViaYtdlp(url, quality, audioOnly = false)
-
-            lower.contains("facebook.com") || lower.contains("fb.watch") ||
-            lower.contains("vk.com") || lower.contains("twitter.com") ||
-            lower.contains("x.com") || lower.contains("reddit.com") ||
-            lower.contains("pinterest.com") || lower.contains("pin.it") ||
-            lower.contains("snapchat.com") -> resolveCobalt(url, quality)
+            lower.contains("facebook.com") || lower.contains("fb.watch") ->
+                resolveCobalt(url, quality)
 
             lower.endsWith(".mp4") || lower.endsWith(".webm") ||
             lower.endsWith(".mov") || lower.endsWith(".m4v") -> Resolved(videoUrl = url)
 
-            else -> resolveCobalt(url, quality)
+            else -> throw Exception("Сервис пока не поддерживается")
         }
     }
 
@@ -426,43 +407,6 @@ class DownloadWorker(
                 lastTikwmCallMs = System.currentTimeMillis()
             }
         }
-    }
-
-    private fun resolveViaYtdlp(
-        url: String,
-        quality: VideoQuality,
-        audioOnly: Boolean
-    ): Resolved? {
-        val qualityStr = when (quality) {
-            VideoQuality.MAX -> "max"
-            VideoQuality.P1080 -> "1080"
-            VideoQuality.P720 -> "720"
-            VideoQuality.P480 -> "480"
-            VideoQuality.P360 -> "360"
-        }
-        val body = """{"url":"$url","audio_only":$audioOnly,"quality":"$qualityStr"}"""
-        Log.d(TAG, "yt-dlp request: $body")
-
-        val response = httpPostJson(YTDLP_URL, body, timeoutMs = 60_000)
-            ?: throw Exception("yt-dlp сервер не ответил")
-        val obj = JSONObject(response)
-        if (obj.has("detail")) {
-            val detail = obj.optString("detail")
-            if (detail.contains("Sign in to confirm", ignoreCase = true) ||
-                detail.contains("not a bot", ignoreCase = true)) {
-                throw Exception("YouTube требует авторизацию. См. Настройки → YouTube")
-            }
-            if (detail.contains("login", ignoreCase = true)) {
-                throw Exception("Instagram требует авторизацию. См. Настройки → Instagram")
-            }
-            throw Exception("yt-dlp: " + detail.take(150))
-        }
-        val media = obj.optString("video_url").ifBlank { null }
-            ?: throw Exception("yt-dlp: нет ссылки")
-        val thumb = obj.optString("thumbnail").ifBlank { null }
-        val ext = obj.optString("ext").ifBlank { null }
-        Log.d(TAG, "yt-dlp OK: ext=$ext")
-        return Resolved(videoUrl = media, thumbnail = thumb, extension = ext)
     }
 
     private fun resolveCobalt(
@@ -743,7 +687,6 @@ class DownloadWorker(
         const val KEY_ERROR = "error"
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-        private const val YTDLP_URL = "https://ytdlp-server-production-16c0.up.railway.app/api/resolve"
 
         private const val TIKWM_MIN_INTERVAL_MS = 1100L
         private val tikwmMutex = Mutex()
