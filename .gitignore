@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Android
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+release/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Keystore — НИКОГДА не коммитим!
+*.keystore
+*.jks
+keystore.b64
+
+# OS
+.DS_Store
+Thumbs.db
