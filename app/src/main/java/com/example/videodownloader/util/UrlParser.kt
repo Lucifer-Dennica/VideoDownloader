@@ -11,27 +11,26 @@ data class ParsedUrl(
 
 object UrlParser {
 
-    /** Известные сервисы. */
+    /**
+     * Только те сервисы, которые реально работают на текущий момент.
+     * Остальные (Vimeo, Twitch, Rutube, Tumblr, Odysee, Rumble, Dailymotion,
+     * LinkedIn, Threads) убраны — они не скачиваются через публичные Cobalt-инстансы.
+     */
     private val knownHosts = listOf(
+        // 100% работает
         "tiktok.com", "vt.tiktok.com", "vm.tiktok.com",
+        // Работает с cookies
         "youtube.com", "youtu.be", "m.youtube.com",
         "instagram.com",
+        // Работает нестабильно, но шансы есть
         "facebook.com", "fb.watch", "m.facebook.com",
         "vk.com", "m.vk.com",
         "twitter.com", "x.com",
         "reddit.com", "redd.it",
         "pinterest.com", "pin.it",
         "snapchat.com",
-        "vimeo.com",
-        "dailymotion.com", "dai.ly",
-        "twitch.tv",
-        "rumble.com",
-        "odysee.com",
-        "soundcloud.com",
-        "rutube.ru",
-        "linkedin.com",
-        "threads.net",
-        "tumblr.com"
+        // Аудио-сервисы
+        "soundcloud.com"
     )
 
     /** Одна ссылка. Возвращает null, если невалидна или сервис неизвестен. */
@@ -79,16 +78,7 @@ object UrlParser {
         host.contains("reddit") || host == "redd.it" -> "Reddit"
         host.contains("pinterest") || host == "pin.it" -> "Pinterest"
         host.contains("snapchat") -> "Snapchat"
-        host.contains("vimeo") -> "Vimeo"
-        host.contains("dailymotion") || host == "dai.ly" -> "Dailymotion"
-        host.contains("twitch") -> "Twitch"
-        host.contains("rumble") -> "Rumble"
-        host.contains("odysee") -> "Odysee"
         host.contains("soundcloud") -> "SoundCloud"
-        host.contains("rutube") -> "Rutube"
-        host.contains("linkedin") -> "LinkedIn"
-        host.contains("threads") -> "Threads"
-        host.contains("tumblr") -> "Tumblr"
         else -> host
     }
 }
