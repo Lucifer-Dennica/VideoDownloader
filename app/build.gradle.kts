@@ -13,13 +13,25 @@ android {
         applicationId = "com.example.videodownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.7.2"
+        versionCode = 22
+        versionName = "1.7.3"
         vectorDrawables { useSupportLibrary = true }
     }
 
     signingConfigs {
+        // Release-ключ берётся из переменных окружения (GitHub Secrets).
+        // Локально, если переменных нет — используется debug-подпись.
+        create("release") {
+            val keystorePath = System.getenv("KEYSTORE_FILE")
+            if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
         getByName("debug") {
+            // стандартный debug.keystore — только для локальных сборок
         }
     }
 
@@ -27,7 +39,15 @@ android {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-            signingConfig = signingConfigs.getByName("debug")
+
+            // Если ключ задан (CI) — используем release, иначе debug
+            val keystorePath = System.getenv("KEYSTORE_FILE")
+            signingConfig = if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
