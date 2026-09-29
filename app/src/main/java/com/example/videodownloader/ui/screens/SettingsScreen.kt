@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,7 +33,6 @@ import androidx.compose.ui.unit.dp
 import androidx.work.WorkManager
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.videodownloader.BuildConfig
-import com.example.videodownloader.data.repository.DownloadRepository
 import com.example.videodownloader.data.settings.SettingsRepository
 import com.example.videodownloader.data.settings.ThemeMode
 import com.example.videodownloader.ui.viewmodel.DownloadViewModel
@@ -54,6 +54,7 @@ fun SettingsScreen(
 
     var showInstagramHelp by remember { mutableStateOf(false) }
     var showYoutubeHelp by remember { mutableStateOf(false) }
+    var showWhyBetter by remember { mutableStateOf(false) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var showRulesDialog by remember { mutableStateOf(false) }
     var showSecurityDialog by remember { mutableStateOf(false) }
@@ -68,7 +69,6 @@ fun SettingsScreen(
 
     val stats by vm.statistics.collectAsState()
 
-    // Пересчитываем статистику при входе на экран
     LaunchedEffect(Unit) {
         vm.loadStatistics()
     }
@@ -105,6 +105,14 @@ fun SettingsScreen(
             title = "YouTube и ограничения",
             content = YOUTUBE_HELP,
             onBack = { showYoutubeHelp = false }
+        )
+        return
+    }
+    if (showWhyBetter) {
+        InfoScreen(
+            title = "Почему наше лучше",
+            content = WHY_BETTER,
+            onBack = { showWhyBetter = false }
         )
         return
     }
@@ -192,7 +200,6 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        // ============ ЗАГРУЗКА ============
         SectionHeader("Загрузка")
 
         SettingSwitch(
@@ -230,7 +237,6 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ ИНТЕРФЕЙС ============
         SectionHeader("Интерфейс")
 
         SettingItem(
@@ -258,7 +264,6 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ СТАТИСТИКА ============
         SectionHeader("Статистика")
 
         val s = stats
@@ -277,7 +282,6 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ ФАЙЛЫ ============
         SectionHeader("Файлы")
 
         SettingItem(
@@ -306,8 +310,14 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ СПРАВКА ============
         SectionHeader("Справка")
+
+        SettingItem(
+            icon = Icons.Default.Star,
+            title = "Почему наше лучше",
+            subtitle = "5 причин выбрать это приложение",
+            onClick = { showWhyBetter = true }
+        )
 
         SettingItem(
             icon = Icons.AutoMirrored.Filled.HelpOutline,
@@ -325,7 +335,6 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ О ПРИЛОЖЕНИИ ============
         SectionHeader("О приложении")
 
         SettingItem(
@@ -358,7 +367,6 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // ============ ПРАВОВАЯ ИНФОРМАЦИЯ ============
         SectionHeader("Правовая информация")
 
         SettingItem(
@@ -486,7 +494,6 @@ private fun SettingSwitch(
     }
 }
 
-/** Строка статистики — только отображение, без действия. */
 @Composable
 private fun StatItem(title: String, value: String) {
     Surface(
@@ -569,4 +576,37 @@ YouTube защищается от автоматических загрузок.
 4. Экспортируйте cookies и передайте в yt-dlp сервер.
 
 Основные соцсети (TikTok, Facebook, VK и др.) работают без ограничений.
+""".trimIndent()
+
+private val WHY_BETTER = """
+VideoDownloader — не просто «скачать видео». Вот что делает его особенным:
+
+✅ БЕЗ ВОДЯНОГО ЗНАКА
+TikTok, встроенная кнопка «Скачать» ставит логотип и ник автора поверх видео. Мы скачиваем чистую версию — без меток, без логотипов.
+
+✅ ОБХОД ЗАПРЕТА НА СКАЧИВАНИЕ
+Если автор запретил скачивание — кнопка в TikTok исчезает. У нас ссылка работает всё равно: мы обращаемся к серверу напрямую, а не через интерфейс.
+
+✅ ФОТО-КАРУСЕЛИ
+TikTok не даёт скачать картинки из постов-каруселей. Мы сохраняем все фото (8, 10, сколько есть) в отдельную папку — по одной карточке на альбом.
+
+✅ ТОЛЬКО АУДИО
+Хотите сохранить только музыку из видео? Включите режим «Только аудио» — получите mp3/m4a без видео.
+
+✅ ПАКЕТНОЕ СКАЧИВАНИЕ
+Вставьте сразу 10 ссылок — по одной на строку. Все уйдут в очередь и скачаются параллельно.
+
+✅ ФОНОВАЯ ЗАГРУЗКА
+Можно свернуть приложение — загрузка продолжится. TikTok требует держать экран открытым.
+
+✅ ОРГАНИЗАЦИЯ
+Файлы сохраняются по папкам: DCIM/VideoDownloader/TikTok/, /YouTube/, /Instagram/. Никакой свалки в общем DCIM.
+
+✅ ЕДИНЫЙ СПИСОК
+Все загрузки — из TikTok, YouTube, Instagram, VK и других — в одном месте. С превью, датой и сортировкой.
+
+✅ БЕСПЛАТНО И БЕЗ РЕКЛАМЫ
+Никаких подписок, никаких всплывающих окон, никаких «премиум» функций.
+
+Приложение поддерживает: TikTok, YouTube, Instagram, Facebook, VK, Twitter/X, Reddit, Pinterest, Snapchat, SoundCloud.
 """.trimIndent()
