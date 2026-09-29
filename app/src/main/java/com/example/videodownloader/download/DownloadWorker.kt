@@ -303,7 +303,11 @@ class DownloadWorker(
         }
     }
 
-    private fun resolveDirectUrl(
+    /**
+     * Определяет, через какой сервис тянуть ссылку.
+     * ⚠️ suspend — потому что resolveTikTok/resolveTikTokAudio под мьютексом.
+     */
+    private suspend fun resolveDirectUrl(
         url: String,
         quality: VideoQuality,
         audioOnly: Boolean
@@ -328,7 +332,6 @@ class DownloadWorker(
             lower.contains("instagram.com") ->
                 resolveViaYtdlp(url, quality, audioOnly = false)
 
-            // Сервисы, которые могут работать через публичные Cobalt-инстансы
             lower.contains("facebook.com") || lower.contains("fb.watch") ||
             lower.contains("vk.com") || lower.contains("twitter.com") ||
             lower.contains("x.com") || lower.contains("reddit.com") ||
