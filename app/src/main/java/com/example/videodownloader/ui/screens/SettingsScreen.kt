@@ -1,6 +1,7 @@
 package com.example.videodownloader.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -52,8 +53,7 @@ fun SettingsScreen(
     val settings = remember { SettingsRepository(context) }
     val scope = rememberCoroutineScope()
 
-    var showInstagramHelp by remember { mutableStateOf(false) }
-    var showYoutubeHelp by remember { mutableStateOf(false) }
+    var showSupportedHelp by remember { mutableStateOf(false) }
     var showWhyBetter by remember { mutableStateOf(false) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var showRulesDialog by remember { mutableStateOf(false) }
@@ -92,19 +92,11 @@ fun SettingsScreen(
         }
     }
 
-    if (showInstagramHelp) {
+    if (showSupportedHelp) {
         InfoScreen(
-            title = "Как скачать из Instagram",
-            content = INSTAGRAM_HELP,
-            onBack = { showInstagramHelp = false }
-        )
-        return
-    }
-    if (showYoutubeHelp) {
-        InfoScreen(
-            title = "YouTube и ограничения",
-            content = YOUTUBE_HELP,
-            onBack = { showYoutubeHelp = false }
+            title = "Поддерживаемые сервисы",
+            content = SUPPORTED_SERVICES,
+            onBack = { showSupportedHelp = false }
         )
         return
     }
@@ -223,7 +215,7 @@ fun SettingsScreen(
         SettingSwitch(
             icon = Icons.Default.MusicNote,
             title = "Только аудио",
-            subtitle = "Скачивать только звук",
+            subtitle = "Скачивать только звук (только TikTok)",
             checked = audioOnly,
             onCheckedChange = { enabled ->
                 scope.launch {
@@ -292,13 +284,6 @@ fun SettingsScreen(
         )
 
         SettingItem(
-            icon = Icons.Default.Upload,
-            title = "Загрузить cookies.txt",
-            subtitle = "Для Instagram и приватного контента",
-            onClick = { cookiesPicker.launch("text/plain") }
-        )
-
-        SettingItem(
             icon = Icons.Default.Delete,
             title = "Очистить очередь",
             subtitle = "Отменить все активные загрузки",
@@ -315,22 +300,15 @@ fun SettingsScreen(
         SettingItem(
             icon = Icons.Default.Star,
             title = "Почему наше лучше",
-            subtitle = "5 причин выбрать это приложение",
+            subtitle = "Преимущества приложения",
             onClick = { showWhyBetter = true }
         )
 
         SettingItem(
             icon = Icons.AutoMirrored.Filled.HelpOutline,
-            title = "Instagram — как скачивать",
-            subtitle = "Требуется авторизация",
-            onClick = { showInstagramHelp = true }
-        )
-
-        SettingItem(
-            icon = Icons.AutoMirrored.Filled.HelpOutline,
-            title = "YouTube — ограничения",
-            subtitle = "Почему иногда требует вход",
-            onClick = { showYoutubeHelp = true }
+            title = "Поддерживаемые сервисы",
+            subtitle = "Что работает сейчас, что в разработке",
+            onClick = { showSupportedHelp = true }
         )
 
         Spacer(Modifier.height(16.dp))
@@ -379,7 +357,7 @@ fun SettingsScreen(
         SettingItem(
             icon = Icons.Default.CheckCircle,
             title = "Безопасность",
-            subtitle = "Cookies хранятся только на устройстве",
+            subtitle = "Никакие данные не передаются наружу",
             onClick = { showSecurityDialog = true }
         )
 
@@ -536,6 +514,11 @@ private fun formatSize(bytes: Long): String {
 
 @Composable
 private fun InfoScreen(title: String, content: String, onBack: () -> Unit) {
+    // Перехватываем системную кнопку Назад
+    BackHandler(enabled = true) {
+        onBack()
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -543,7 +526,20 @@ private fun InfoScreen(title: String, content: String, onBack: () -> Unit) {
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium)
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Text("←", style = MaterialTheme.typography.titleLarge)
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Text(content, style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(16.dp))
@@ -553,36 +549,31 @@ private fun InfoScreen(title: String, content: String, onBack: () -> Unit) {
     }
 }
 
-private val INSTAGRAM_HELP = """
-Instagram — самая защищённая платформа. Он блокирует автоматические запросы и требует авторизации.
+private val SUPPORTED_SERVICES = """
+✅ Работает стабильно:
 
-Что делать:
-1. Откройте Instagram в браузере.
-2. Войдите в свой аккаунт.
-3. Установите расширение «Get cookies.txt LOCALLY».
-4. Откройте расширение и нажмите Export.
-5. Сохраните cookies.txt и загрузите в настройках приложения.
+• TikTok — видео, фото-карусели, аудио
+• Facebook — видео
 
-Cookies хранятся только на вашем устройстве.
-""".trimIndent()
+⚠️ В разработке:
 
-private val YOUTUBE_HELP = """
-YouTube защищается от автоматических загрузок. Иногда он требует подтвердить, что вы не бот.
+• YouTube
+• Instagram
+• VK
+• Twitter / X
+• Reddit
+• Pinterest
+• Snapchat
+• SoundCloud
 
-Если YouTube не качается:
-1. Подождите 2–3 часа и попробуйте снова.
-2. Если не помогает — нужны cookies от аккаунта.
-3. Создайте отдельный тестовый Google-аккаунт (не личный!).
-4. Экспортируйте cookies и передайте в yt-dlp сервер.
-
-Основные соцсети (TikTok, Facebook, VK и др.) работают без ограничений.
+Мы работаем над добавлением всех этих сервисов. Следите за обновлениями!
 """.trimIndent()
 
 private val WHY_BETTER = """
 VideoDownloader — не просто «скачать видео». Вот что делает его особенным:
 
 ✅ БЕЗ ВОДЯНОГО ЗНАКА
-TikTok, встроенная кнопка «Скачать» ставит логотип и ник автора поверх видео. Мы скачиваем чистую версию — без меток, без логотипов.
+TikTok встроенная кнопка «Скачать» ставит логотип и ник автора поверх видео. Мы скачиваем чистую версию — без меток, без логотипов.
 
 ✅ ОБХОД ЗАПРЕТА НА СКАЧИВАНИЕ
 Если автор запретил скачивание — кнопка в TikTok исчезает. У нас ссылка работает всё равно: мы обращаемся к серверу напрямую, а не через интерфейс.
@@ -591,7 +582,7 @@ TikTok, встроенная кнопка «Скачать» ставит лог
 TikTok не даёт скачать картинки из постов-каруселей. Мы сохраняем все фото (8, 10, сколько есть) в отдельную папку — по одной карточке на альбом.
 
 ✅ ТОЛЬКО АУДИО
-Хотите сохранить только музыку из видео? Включите режим «Только аудио» — получите mp3/m4a без видео.
+Хотите сохранить только музыку из видео TikTok? Включите режим «Только аудио» — получите mp3/m4a без видео.
 
 ✅ ПАКЕТНОЕ СКАЧИВАНИЕ
 Вставьте сразу 10 ссылок — по одной на строку. Все уйдут в очередь и скачаются параллельно.
@@ -600,13 +591,8 @@ TikTok не даёт скачать картинки из постов-кару�
 Можно свернуть приложение — загрузка продолжится. TikTok требует держать экран открытым.
 
 ✅ ОРГАНИЗАЦИЯ
-Файлы сохраняются по папкам: DCIM/VideoDownloader/TikTok/, /YouTube/, /Instagram/. Никакой свалки в общем DCIM.
-
-✅ ЕДИНЫЙ СПИСОК
-Все загрузки — из TikTok, YouTube, Instagram, VK и других — в одном месте. С превью, датой и сортировкой.
+Файлы сохраняются по папкам: DCIM/VideoDownloader/TikTok/, /Facebook/. Никакой свалки в общем DCIM.
 
 ✅ БЕСПЛАТНО И БЕЗ РЕКЛАМЫ
 Никаких подписок, никаких всплывающих окон, никаких «премиум» функций.
-
-Приложение поддерживает: TikTok, YouTube, Instagram, Facebook, VK, Twitter/X, Reddit, Pinterest, Snapchat, SoundCloud.
 """.trimIndent()
