@@ -18,36 +18,11 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
-    signingConfigs {
-        // Release-ключ берётся из переменных окружения (GitHub Secrets).
-        // Локально, если переменных нет — используется debug-подпись.
-        create("release") {
-            val keystorePath = System.getenv("KEYSTORE_FILE")
-            if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
-                storeFile = file(keystorePath)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
-            }
-        }
-        getByName("debug") {
-            // стандартный debug.keystore — только для локальных сборок
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-
-            // Если ключ задан (CI) — используем release, иначе debug
-            val keystorePath = System.getenv("KEYSTORE_FILE")
-            signingConfig = if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
-
+            // signingConfig не указываем — AGP возьмёт из -Pandroid.injected.signing.*
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
