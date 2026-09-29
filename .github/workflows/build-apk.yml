@@ -62,7 +62,6 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > app/release.jks
           echo "✅ Keystore decoded:"
           ls -la app/release.jks
-          file app/release.jks
 
       - name: Build release APK
         run: |
@@ -81,24 +80,26 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.7.3.apk
+          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.7.4.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-v1.7.3
-          path: release/VideoDownloader-v1.7.3.apk
+          name: VideoDownloader-v1.7.4
+          path: release/VideoDownloader-v1.7.4.apk
           if-no-files-found: error
 
       - name: Attach APK to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/VideoDownloader-v1.7.3.apk
+          files: release/VideoDownloader-v1.7.4.apk
           tag_name: ${{ github.event.release.tag_name }}
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Подпись release-ключа
+            - Поддержка TikTok и Facebook
+            - Фикс: системная кнопка «Назад» в справке
+            - Обновлён список сервисов
           draft: false
           prerelease: false
