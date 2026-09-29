@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.videodownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 22
-        versionName = "1.7.3"
+        versionCode = 23
+        versionName = "1.7.4"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -22,7 +22,6 @@ android {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-            // signingConfig не указываем — AGP возьмёт из -Pandroid.injected.signing.*
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
