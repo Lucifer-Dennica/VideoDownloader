@@ -64,7 +64,9 @@ class DownloadWorker(
 
             if (resolved.imageUrls.isNotEmpty()) {
                 // Фото-карусель TikTok
+                Log.d(TAG, "Фото-карусель: ${resolved.imageUrls.size} фото")
                 val result = downloadPhotoCarousel(resolved.imageUrls, id, service, repository)
+
                 repository.getById(id)?.let {
                     repository.update(it.copy(
                         filePath = result.firstUri,
@@ -88,11 +90,21 @@ class DownloadWorker(
                     ?: throw Exception("Пустой ответ от сервера")
 
                 val tempFile = File(applicationContext.cacheDir, "media_$id.tmp")
-                val result = downloadFile(mediaUrl, tempFile, id, repository, audioOnly)
 
-                if (audioOnly && result.size < 10_000L) {
+                // Проверяем маркер "через сервер"
+                val result = if (mediaUrl.startsWith(SERVER_MARKER)) {
+                    val originalUrl = mediaUrl.removePrefix(SERVER_MARKER)
+                    Log.d(TAG, "Скачивание через сервер: $originalUrl")
+                    downloadFromServer(originalUrl, tempFile, id, repository)
+                } else {
+                    Log.d(TAG, "Скачивание напрямую: $mediaUrl")
+                    downloadFile(mediaUrl, tempFile, id, repository, audioOnly)
+                }
+
+                // Проверка валидности файла
+                if (result.size < 5_000L) {
                     tempFile.delete()
-                    throw Exception("Сервер вернул пустой аудиофайл (${result.size} Б)")
+                    throw Exception("Файл повреждён или пуст (${result.size} Б). Возможно, сервер вернул HLS-плейлист вместо видео.")
                 }
 
                 val extension = resolved.extension
@@ -194,92 +206,12 @@ class DownloadWorker(
     data class CarouselResult(val firstUri: String?, val folderPath: String)
     data class DownloadResult(val size: Long, val contentType: String?)
 
-    private suspend fun downloadPhotoCarousel(
-        imageUrls: List<String>,
-        id: Long,
-        service: String,
-        repository: DownloadRepository
-    ): CarouselResult {
-        val albumName = "album_${id}_${System.currentTimeMillis()}"
-        val albumPath = "DCIM/VideoDownloader/$service/Photos/$albumName"
-        var firstUri: String? = null
-
-        for ((index, imgUrl) in imageUrls.withIndex()) {
-            try {
-                val tempImg = File(applicationContext.cacheDir, "img_${id}_$index.jpg")
-                downloadFileSimple(imgUrl, tempImg)
-                val savedUri = saveImageToDcim(tempImg, "photo_${index + 1}.jpg", albumPath)
-                if (firstUri == null) firstUri = savedUri
-                tempImg.delete()
-
-                val percent = 5 + ((index + 1) * 90 / imageUrls.size)
-                repository.getById(id)?.let { repository.update(it.copy(progress = percent)) }
-                showNotification(id, "Скачивание фото ${index + 1}/${imageUrls.size}", percent, true)
-            } catch (e: Exception) {
-                Log.w(TAG, "Не удалось скачать фото $index: ${e.message}")
-            }
-        }
-        return CarouselResult(firstUri, albumPath)
-    }
-
-    private fun downloadFileSimple(url: String, outFile: File) {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", USER_AGENT)
-        }
-        try {
-            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
-            conn.inputStream.use { input ->
-                outFile.outputStream().use { output -> input.copyTo(output, 64 * 1024) }
-            }
-        } finally { conn.disconnect() }
-    }
-
-    private fun saveImageToDcim(tempFile: File, fileName: String, relativePath: String): String? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, relativePath)
-                put(MediaStore.Images.Media.IS_PENDING, 1)
-            }
-            val resolver = applicationContext.contentResolver
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                ?: return null
-            try {
-                resolver.openOutputStream(uri).use { out ->
-                    if (out == null) return null
-                    tempFile.inputStream().use { input -> input.copyTo(out, 64 * 1024) }
-                }
-                values.clear()
-                values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
-                return uri.toString()
-            } catch (e: Exception) {
-                Log.e(TAG, "saveImageToDcim error", e)
-                return null
-            }
-        }
-        return null
-    }
-
-    private fun getServiceFolder(url: String): String {
-        val lower = url.lowercase()
-        return when {
-            lower.contains("tiktok.com") -> "TikTok"
-            lower.contains("rutube.ru") -> "Rutube"
-            lower.contains("facebook.com") || lower.contains("fb.watch") -> "Facebook"
-            lower.contains("instagram.com") -> "Instagram"
-            lower.contains("pinterest.com") || lower.contains("pin.it") -> "Pinterest"
-            else -> "Other"
-        }
-    }
+    // ==================== РОУТИНГ ====================
 
     /**
-     * Роутинг: TikTok напрямую через tikwm (с телефона),
-     * Rutube / Facebook / Instagram / Pinterest — через Render.
+     * TikTok → tikwm напрямую (с телефона, бесплатно).
+     * Остальное → через Render-сервер (ffmpeg склеит HLS в mp4).
+     * Прямые .mp4 → качаем как есть.
      */
     private suspend fun resolveMedia(
         url: String,
@@ -288,34 +220,49 @@ class DownloadWorker(
     ): Resolved? {
         val lower = url.lowercase()
 
-        // TikTok → tikwm напрямую (работает)
-        if (lower.contains("tiktok.com")) {
+        // 1. TikTok — напрямую через tikwm
+        if (lower.contains("tiktok.com") || lower.contains("vt.tiktok") || lower.contains("vm.tiktok")) {
             return if (audioOnly) resolveTikTokAudio(url) else resolveTikTok(url, quality)
         }
 
-        // Direct .mp4
+        // 2. Прямые медиа-ссылки
         if (lower.endsWith(".mp4") || lower.endsWith(".webm") ||
             lower.endsWith(".mov") || lower.endsWith(".m4v")) {
-            return Resolved(videoUrl = url)
+            return Resolved(videoUrl = url, extension = "mp4")
         }
 
-        // Для всего остального — сначала получаем метаданные
-        val info = fetchInfo(url)
-        if (info == null) {
-            throw Exception("Сервис недоступен")
-        }
+        // 3. Всё остальное — через сервер.
+        // Сначала получаем метаданные (для превью), потом маркер скачивания.
+        val info = fetchInfoFromServer(url)
+            ?: throw Exception("Сервис временно недоступен. Попробуйте позже.")
 
-        // Скачивание через сервер (склеивает HLS в mp4)
-        val downloadUrl = "$SERVER_BASE/api/download"
+        val thumb = info.optString("thumbnail").ifBlank { null }
 
+        // Маркер: в doWork() проверим и качнём через /api/download
         return Resolved(
-            videoUrl = "server://$url",  // специальный маркер
-            thumbnail = info.thumbnail,
+            videoUrl = "$SERVER_MARKER$url",
+            thumbnail = thumb,
             extension = "mp4"
-        ).also {
-            // Запоминаем реальный URL для скачивания
+        )
+    }
+
+    /** Метаданные для превью (thumbnail, title, duration). */
+    private fun fetchInfoFromServer(url: String): JSONObject? {
+        return try {
+            val body = """{"url":"$url"}"""
+            val response = httpPostJson("$SERVER_BASE/api/info", body, 30_000) ?: return null
+            val obj = JSONObject(response)
+            if (obj.has("detail")) {
+                Log.w(TAG, "Server info error: ${obj.optString("detail")}")
+                null
+            } else obj
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchInfo: ${e.message}")
+            null
         }
     }
+
+    // ==================== TIKTOK (tikwm) ====================
 
     private suspend fun resolveTikTokAudio(url: String): Resolved? = withTikwmLock {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
@@ -325,7 +272,11 @@ class DownloadWorker(
         val data = obj.optJSONObject("data") ?: throw Exception("tikwm: нет data")
         val music = data.optString("music").ifBlank { null } ?: throw Exception("tikwm: нет аудио")
         val ext = if (music.contains(".mp3", true)) "mp3" else "m4a"
-        Resolved(videoUrl = music, thumbnail = data.optString("cover").ifBlank { null }, extension = ext)
+        Resolved(
+            videoUrl = music,
+            thumbnail = data.optString("cover").ifBlank { null },
+            extension = ext
+        )
     }
 
     private suspend fun resolveTikTok(url: String, quality: VideoQuality): Resolved? = withTikwmLock {
@@ -337,7 +288,6 @@ class DownloadWorker(
         val data = obj.optJSONObject("data") ?: throw Exception("tikwm: нет data")
         val cover = data.optString("cover").ifBlank { null }
 
-        // Фото-карусель?
         val imagesArr = data.optJSONArray("images")
         if (imagesArr != null && imagesArr.length() > 0) {
             val images = mutableListOf<String>()
@@ -367,66 +317,70 @@ class DownloadWorker(
         }
     }
 
-    /** Запрос к Render-серверу (FastSaver). */
-    private fun resolveViaServer(url: String, audioOnly: Boolean): Resolved? {
-        val body = """{"url":"$url","audio_only":$audioOnly,"quality":"max"}"""
-        Log.d(TAG, "Render request: $body")
+    // ==================== СКАЧИВАНИЕ ====================
 
-        val response = httpPostJson(SERVER_URL, body, 90_000)
-            ?: throw Exception("Сервер не ответил")
-
-        val obj = JSONObject(response)
-
-        if (obj.has("detail")) {
-            val detail = obj.optString("detail")
-            throw Exception(detail.take(200))
-        }
-
-        val media = obj.optString("video_url").ifBlank { null }
-            ?: throw Exception("Сервер вернул пустой ответ")
-
-        val thumb = obj.optString("thumbnail").ifBlank { null }
-        val ext = obj.optString("ext").ifBlank { "mp4" }
-
-        return Resolved(videoUrl = media, thumbnail = thumb, extension = ext)
-    }
-
-    private fun httpGetString(apiUrl: String, timeoutMs: Int): String? {
-        val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = timeoutMs
-            setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Accept", "application/json")
-        }
-        return try {
-            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
-            conn.inputStream.bufferedReader().readText()
-        } finally { conn.disconnect() }
-    }
-
-    private fun httpPostJson(apiUrl: String, body: String, timeoutMs: Int): String? {
-        val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+    /** Скачивает видео через сервер (ffmpeg склеит HLS в mp4). */
+    private suspend fun downloadFromServer(
+        originalUrl: String,
+        outFile: File,
+        id: Long,
+        repository: DownloadRepository
+    ): DownloadResult {
+        val body = """{"url":"$originalUrl"}"""
+        val conn = (URL("$SERVER_BASE/api/download").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
-            readTimeout = timeoutMs
+            readTimeout = 300_000  // 5 минут — ffmpeg может долго обрабатывать
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", USER_AGENT)
         }
-        return try {
+        try {
             conn.outputStream.use { it.write(body.toByteArray()) }
+
             val code = conn.responseCode
-            val text = if (code in 200..299) {
-                conn.inputStream.bufferedReader().readText()
-            } else {
-                conn.errorStream?.bufferedReader()?.readText().orEmpty()
+            if (code !in 200..299) {
+                val errText = conn.errorStream?.bufferedReader()?.readText().orEmpty()
+                throw Exception("Сервер вернул HTTP $code: ${errText.take(200)}")
             }
-            text.ifBlank { throw Exception("HTTP $code") }
-        } finally { conn.disconnect() }
+
+            val contentType = conn.contentType?.substringBefore(";")?.trim()
+            Log.d(TAG, "downloadFromServer: type=$contentType, size=${conn.contentLengthLong}")
+
+            val total = conn.contentLengthLong
+            var done = 0L
+            var lastNotified = 0
+            conn.inputStream.use { input ->
+                outFile.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var read: Int
+                    while (input.read(buffer).also { read = it } != -1) {
+                        output.write(buffer, 0, read)
+                        done += read
+                        if (total > 0) {
+                            val percent = 5 + ((done * 90) / total).toInt()
+                            repository.getById(id)?.let { repository.update(it.copy(progress = percent)) }
+                            if (percent - lastNotified >= 10) {
+                                lastNotified = percent
+                                showNotification(id, "Скачивание… $percent%", percent, ongoing = true)
+                            }
+                        } else {
+                            // Неизвестный размер — показываем прогресс по факту
+                            val kb = done / 1024
+                            if (kb % 500 == 0L) {
+                                showNotification(id, "Скачано ${kb} КБ", 50, ongoing = true)
+                            }
+                        }
+                    }
+                }
+            }
+            return DownloadResult(size = done, contentType = contentType)
+        } finally {
+            conn.disconnect()
+        }
     }
 
+    /** Прямое скачивание (TikTok, direct mp4). */
     private suspend fun downloadFile(
         url: String,
         outFile: File,
@@ -467,6 +421,131 @@ class DownloadWorker(
             }
             return DownloadResult(size = done, contentType = contentType)
         } finally { conn.disconnect() }
+    }
+
+    private fun downloadFileSimple(url: String, outFile: File) {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        try {
+            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            conn.inputStream.use { input ->
+                outFile.outputStream().use { output -> input.copyTo(output, 64 * 1024) }
+            }
+        } finally { conn.disconnect() }
+    }
+
+    // ==================== ФОТО-КАРУСЕЛЬ ====================
+
+    private suspend fun downloadPhotoCarousel(
+        imageUrls: List<String>,
+        id: Long,
+        service: String,
+        repository: DownloadRepository
+    ): CarouselResult {
+        val albumName = "album_${id}_${System.currentTimeMillis()}"
+        val albumPath = "DCIM/VideoDownloader/$service/Photos/$albumName"
+        var firstUri: String? = null
+
+        for ((index, imgUrl) in imageUrls.withIndex()) {
+            try {
+                val tempImg = File(applicationContext.cacheDir, "img_${id}_$index.jpg")
+                downloadFileSimple(imgUrl, tempImg)
+                val savedUri = saveImageToDcim(tempImg, "photo_${index + 1}.jpg", albumPath)
+                if (firstUri == null) firstUri = savedUri
+                tempImg.delete()
+
+                val percent = 5 + ((index + 1) * 90 / imageUrls.size)
+                repository.getById(id)?.let { repository.update(it.copy(progress = percent)) }
+                showNotification(id, "Скачивание фото ${index + 1}/${imageUrls.size}", percent, true)
+            } catch (e: Exception) {
+                Log.w(TAG, "Не удалось скачать фото $index: ${e.message}")
+            }
+        }
+        return CarouselResult(firstUri, albumPath)
+    }
+
+    private fun saveImageToDcim(tempFile: File, fileName: String, relativePath: String): String? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, relativePath)
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val resolver = applicationContext.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return null
+            try {
+                resolver.openOutputStream(uri).use { out ->
+                    if (out == null) return null
+                    tempFile.inputStream().use { input -> input.copyTo(out, 64 * 1024) }
+                }
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                return uri.toString()
+            } catch (e: Exception) {
+                Log.e(TAG, "saveImageToDcim error", e)
+                return null
+            }
+        }
+        return null
+    }
+
+    // ==================== HTTP HELPERS ====================
+
+    private fun httpGetString(apiUrl: String, timeoutMs: Int): String? {
+        val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10_000
+            readTimeout = timeoutMs
+            setRequestProperty("User-Agent", USER_AGENT)
+            setRequestProperty("Accept", "application/json")
+        }
+        return try {
+            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            conn.inputStream.bufferedReader().readText()
+        } finally { conn.disconnect() }
+    }
+
+    private fun httpPostJson(apiUrl: String, body: String, timeoutMs: Int): String? {
+        val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = timeoutMs
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        return try {
+            conn.outputStream.use { it.write(body.toByteArray()) }
+            val code = conn.responseCode
+            val text = if (code in 200..299) {
+                conn.inputStream.bufferedReader().readText()
+            } else {
+                conn.errorStream?.bufferedReader()?.readText().orEmpty()
+            }
+            text.ifBlank { throw Exception("HTTP $code") }
+        } finally { conn.disconnect() }
+    }
+
+    // ==================== СОХРАНЕНИЕ ====================
+
+    private fun getServiceFolder(url: String): String {
+        val lower = url.lowercase()
+        return when {
+            lower.contains("tiktok.com") -> "TikTok"
+            lower.contains("rutube.ru") -> "Rutube"
+            lower.contains("facebook.com") || lower.contains("fb.watch") -> "Facebook"
+            lower.contains("instagram.com") -> "Instagram"
+            lower.contains("pinterest.com") || lower.contains("pin.it") -> "Pinterest"
+            else -> "Other"
+        }
     }
 
     private fun saveToPublicDcim(tempFile: File, fileName: String, service: String): String {
@@ -536,6 +615,8 @@ class DownloadWorker(
         }
     }
 
+    // ==================== УВЕДОМЛЕНИЯ ====================
+
     private fun showNotification(
         id: Long, text: String, progress: Int, ongoing: Boolean,
         clickUri: Uri? = null, clickMime: String? = null
@@ -588,7 +669,10 @@ class DownloadWorker(
         const val KEY_ERROR = "error"
 
         // ⚠️ URL сервера на Render
-        private const val SERVER_URL = "https://videodownloader-backend-te3k.onrender.com/api/resolve"
+        private const val SERVER_BASE = "https://videodownloader-backend-te3k.onrender.com"
+
+        // Маркер: означает, что скачивание должно идти через /api/download
+        private const val SERVER_MARKER = "SERVER_DOWNLOAD:"
 
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
