@@ -71,21 +71,21 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Загрузка превью с debounce
+    // Фоновое получение превью (с debounce)
     LaunchedEffect(link) {
         if (link.isBlank()) {
             onPreviewClear()
             return@LaunchedEffect
         }
         if (parsedList.size == 1) {
-            delay(700)
+            delay(800)
             onPreviewRequest(parsedList.first().value)
         } else {
             onPreviewClear()
         }
     }
 
-    // Автоскачивание — только одна ссылка
+    // Автоскачивание
     LaunchedEffect(link, autoDownload, audioOnly) {
         if (!autoDownload || audioOnly) return@LaunchedEffect
         if (parsedList.size != 1) return@LaunchedEffect
@@ -100,7 +100,24 @@ fun HomeScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("VideoDownloader", style = MaterialTheme.typography.headlineLarge)
+        // --- Заголовок + индикатор загрузки превью ---
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "VideoDownloader",
+                style = MaterialTheme.typography.headlineLarge,
+                modifier = Modifier.weight(1f)
+            )
+            if (preview is PreviewState.Loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
         Text(
             "Вставьте ссылку — одну или несколько, по одной на строку.",
             style = MaterialTheme.typography.bodyMedium,
@@ -109,131 +126,86 @@ fun HomeScreen(
 
         LinkInputField(link) { link = it }
 
-        // --- Статус валидации ---
-        when {
-            !hasText -> Unit
-            parsedList.isEmpty() -> {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = MaterialTheme.shapes.small
-                ) {
-                    Text(
-                        "⚠️ Ссылка не поддерживается",
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                    )
-                }
+        // --- Ошибка валидации ---
+        if (hasText && parsedList.isEmpty()) {
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = MaterialTheme.shapes.small
+            ) {
+                Text(
+                    "⚠️ Ссылка не поддерживается",
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
             }
         }
 
-        // --- Превью-карточка ---
-        when (val p = preview) {
-            is PreviewState.Loading -> {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text("Получаем информацию о видео…")
-                    }
-                }
-            }
-            is PreviewState.Success -> {
-                PreviewCard(
-                    title = p.title,
-                    thumbnail = p.thumbnail,
-                    duration = p.duration,
-                    service = p.service,
-                    audioOnly = audioOnly,
-                    enabled = parsedList.isNotEmpty(),
-                    onVideo = {
-                        if (parsedList.size >= 2) onDownloadMany(link)
-                        else onDownloadVideo(link)
-                        link = ""
-                    },
-                    onAudio = {
-                        if (parsedList.size >= 2) onDownloadMany(link)
-                        else onDownloadAudio(link)
-                        link = ""
-                    }
+        // --- Превью-карточка (если есть данные) ---
+        val successPreview = preview as? PreviewState.Success
+        if (successPreview != null) {
+            PreviewCard(
+                title = successPreview.title,
+                thumbnail = successPreview.thumbnail,
+                duration = successPreview.duration,
+                service = successPreview.service
+            )
+        }
+
+        // --- Предупреждение "скоро" ---
+        val comingSoon = preview as? PreviewState.ComingSoon
+        if (comingSoon != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "🕐 ${comingSoon.service}: скоро добавим",
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                 )
             }
-            is PreviewState.ComingSoon -> {
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
+        }
+
+        // --- Кнопки скачивания — активны сразу ---
+        if (parsedList.isNotEmpty()) {
+            val isMulti = parsedList.size >= 2
+
+            if (audioOnly) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        "🕐 ${p.service}: скоро добавим",
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                    )
-                }
-            }
-            is PreviewState.Error -> {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "⚠️ ${p.message}",
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                    )
-                }
-            }
-            PreviewState.Idle -> {
-                // Если превью нет — показываем простые кнопки
-                if (parsedList.isNotEmpty()) {
-                    val isMulti = parsedList.size >= 2
-                    if (audioOnly) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    if (isMulti) onDownloadMany(link) else onDownloadVideo(link)
-                                    link = ""
-                                },
-                                enabled = parsedList.isNotEmpty(),
-                                modifier = Modifier.weight(1f)
-                            ) { Text(if (isMulti) "🎬 Видео (${parsedList.size})" else "🎬 Скачать") }
-                            OutlinedButton(
-                                onClick = {
-                                    if (isMulti) onDownloadMany(link) else onDownloadAudio(link)
-                                    link = ""
-                                },
-                                enabled = parsedList.isNotEmpty(),
-                                modifier = Modifier.weight(1f)
-                            ) { Text(if (isMulti) "🎵 Аудио (${parsedList.size})" else "🎵 Аудио") }
-                        }
-                    } else {
-                        Button(
-                            onClick = {
-                                if (isMulti) onDownloadMany(link) else onDownloadVideo(link)
-                                link = ""
-                            },
-                            enabled = parsedList.isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(if (isMulti) "🎬 Скачать все (${parsedList.size})" else "🎬 Скачать")
-                        }
+                    Button(
+                        onClick = {
+                            if (isMulti) onDownloadMany(link) else onDownloadVideo(link)
+                            link = ""
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (isMulti) "🎬 Видео (${parsedList.size})" else "🎬 Скачать")
                     }
+                    OutlinedButton(
+                        onClick = {
+                            if (isMulti) onDownloadMany(link) else onDownloadAudio(link)
+                            link = ""
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (isMulti) "🎵 Аудио (${parsedList.size})" else "🎵 Аудио")
+                    }
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (isMulti) onDownloadMany(link) else onDownloadVideo(link)
+                        link = ""
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isMulti) "🎬 Скачать все (${parsedList.size})" else "🎬 Скачать")
                 }
             }
         }
@@ -256,17 +228,13 @@ fun HomeScreen(
     }
 }
 
-/** Красивая карточка превью с обложкой и кнопками. */
+/** Карточка превью (только отображение, кнопки — выше). */
 @Composable
 private fun PreviewCard(
     title: String,
     thumbnail: String?,
     duration: Int?,
-    service: String,
-    audioOnly: Boolean,
-    enabled: Boolean,
-    onVideo: () -> Unit,
-    onAudio: () -> Unit
+    service: String
 ) {
     val context = LocalContext.current
     val durationText = duration?.let {
@@ -280,74 +248,45 @@ private fun PreviewCard(
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Row {
-                // Обложка
-                Box(
-                    Modifier
-                        .width(120.dp)
-                        .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (!thumbnail.isNullOrBlank()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(thumbnail)
-                                .crossfade(true)
-                                .size(300, 170)
-                                .build(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Text("🎬", style = MaterialTheme.typography.displaySmall)
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+        Row(Modifier.padding(12.dp)) {
+            Box(
+                Modifier
+                    .width(120.dp)
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!thumbnail.isNullOrBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(thumbnail)
+                            .crossfade(true)
+                            .size(300, 170)
+                            .build(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        listOfNotNull(service, durationText).joinToString(" • "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                } else {
+                    Text("🎬", style = MaterialTheme.typography.displaySmall)
                 }
             }
-
-            Spacer(Modifier.height(12.dp))
-
-            if (audioOnly) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = onVideo,
-                        enabled = enabled,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("🎬 Скачать") }
-                    OutlinedButton(
-                        onClick = onAudio,
-                        enabled = enabled,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("🎵 Аудио") }
-                }
-            } else {
-                Button(
-                    onClick = onVideo,
-                    enabled = enabled,
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("🎬 Скачать") }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    listOfNotNull(service, durationText).joinToString(" • "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -372,12 +311,20 @@ private fun ActiveDownloadCard(item: DownloadEntity, onDelete: () -> Unit) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
                 "DOWNLOADING" -> {
-                    Text("⬇️ Скачивание ${item.progress}%", style = MaterialTheme.typography.bodySmall)
-                    Spacer(Modifier.height(4.dp))
-                    LinearProgressIndicator(
-                        progress = { item.progress / 100f },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    // Если идёт обработка на сервере — показываем неопределённый прогресс
+                    val isProcessing = item.error?.contains("Обработка") == true
+                    if (isProcessing) {
+                        Text("⚙️ Обработка на сервере…", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    } else {
+                        Text("⬇️ Скачивание ${item.progress}%", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { item.progress / 100f },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
                 "ERROR" -> Text(
                     "❌ ${item.error ?: "Ошибка"}",
