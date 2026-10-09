@@ -1,18 +1,13 @@
 package com.example.videodownloader.ui.screens
 
-import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentPaste
@@ -36,8 +31,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.work.WorkManager
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.work.WorkManager
 import com.example.videodownloader.BuildConfig
 import com.example.videodownloader.data.settings.SettingsRepository
 import com.example.videodownloader.data.settings.ThemeMode
@@ -57,7 +52,7 @@ fun SettingsScreen(
     val settings = remember { SettingsRepository(context) }
     val scope = rememberCoroutineScope()
 
-    var showSupportedHelp by remember { mutableStateOf(false) }
+    var showSupported by remember { mutableStateOf(false) }
     var showWhyBetter by remember { mutableStateOf(false) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var showRulesDialog by remember { mutableStateOf(false) }
@@ -73,25 +68,13 @@ fun SettingsScreen(
 
     val stats by vm.statistics.collectAsState()
 
-    LaunchedEffect(Unit) {
-        vm.loadStatistics()
-    }
+    LaunchedEffect(Unit) { vm.loadStatistics() }
 
-    if (showSupportedHelp) {
-        InfoScreen(
-            title = "Поддерживаемые сервисы",
-            content = SUPPORTED_SERVICES,
-            onBack = { showSupportedHelp = false }
-        )
-        return
+    if (showSupported) {
+        InfoScreen("Поддерживаемые сервисы", SUPPORTED, { showSupported = false }); return
     }
     if (showWhyBetter) {
-        InfoScreen(
-            title = "Почему наше лучше",
-            content = WHY_BETTER,
-            onBack = { showWhyBetter = false }
-        )
-        return
+        InfoScreen("Почему наше лучше", WHY_BETTER, { showWhyBetter = false }); return
     }
 
     if (showThemeDialog) {
@@ -102,31 +85,23 @@ fun SettingsScreen(
                 Column {
                     ThemeMode.entries.forEach { mode ->
                         Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    scope.launch { settings.setThemeMode(mode) }
-                                    showThemeDialog = false
-                                }
-                                .padding(vertical = 10.dp),
+                            Modifier.fillMaxWidth().clickable {
+                                scope.launch { settings.setThemeMode(mode) }
+                                showThemeDialog = false
+                            }.padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            RadioButton(
-                                selected = themeMode == mode,
-                                onClick = {
-                                    scope.launch { settings.setThemeMode(mode) }
-                                    showThemeDialog = false
-                                }
-                            )
+                            RadioButton(selected = themeMode == mode, onClick = {
+                                scope.launch { settings.setThemeMode(mode) }
+                                showThemeDialog = false
+                            })
                             Spacer(Modifier.width(8.dp))
                             Text(mode.label, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showThemeDialog = false }) { Text("Закрыть") }
-            }
+            confirmButton = { TextButton(onClick = { showThemeDialog = false }) { Text("Закрыть") } }
         )
     }
 
@@ -134,376 +109,197 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showRulesDialog = false },
             title = { Text("Правила использования") },
-            text = {
-                Text(
-                    "Приложение предназначено для личного использования. " +
-                    "Скачивайте только тот контент, на который у вас есть права. " +
-                    "Мы не храним видео на серверах и не передаём данные третьим лицам."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showRulesDialog = false }) { Text("Понятно") }
-            }
+            text = { Text("Приложение предназначено для личного использования. Скачивайте только тот контент, на который у вас есть права.") },
+            confirmButton = { TextButton(onClick = { showRulesDialog = false }) { Text("Понятно") } }
         )
     }
-
     if (showSecurityDialog) {
         AlertDialog(
             onDismissRequest = { showSecurityDialog = false },
             title = { Text("Безопасность") },
-            text = {
-                Text(
-                    "Все данные хранятся только на вашем устройстве. " +
-                    "Приложение не отправляет ссылки на сторонние серверы, " +
-                    "кроме тех, что нужны для скачивания видео."
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { showSecurityDialog = false }) { Text("Понятно") }
-            }
+            text = { Text("Все данные хранятся только на вашем устройстве.") },
+            confirmButton = { TextButton(onClick = { showSecurityDialog = false }) { Text("Понятно") } }
         )
     }
 
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            "Настройки",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+        Text("Настройки", style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(bottom = 8.dp))
 
         SectionHeader("Загрузка")
 
-        SettingSwitch(
-            icon = Icons.Default.ContentPaste,
-            title = "Автопаста из буфера",
-            subtitle = "Подставлять ссылку автоматически",
-            checked = autoPaste,
-            onCheckedChange = { scope.launch { settings.setAutoPaste(it) } }
-        )
-
-        SettingSwitch(
-            icon = Icons.Default.Download,
-            title = "Автоскачивание",
-            subtitle = if (audioOnly) "Недоступно в режиме «Только аудио»"
-                       else "Начинать скачивание сразу после вставки",
-            checked = autoDownload && !audioOnly,
-            enabled = !audioOnly,
-            onCheckedChange = { scope.launch { settings.setAutoDownload(it) } }
-        )
-
-        SettingSwitch(
-            icon = Icons.Default.MusicNote,
-            title = "Только аудио",
-            subtitle = "Скачивать только звук (только TikTok)",
-            checked = audioOnly,
-            onCheckedChange = { enabled ->
-                scope.launch {
-                    settings.setAudioOnly(enabled)
-                    if (enabled && autoDownload) {
-                        settings.setAutoDownload(false)
-                    }
-                }
+        SettingSwitch(Icons.Default.ContentPaste, "Автопаста из буфера",
+            "Подставлять ссылку автоматически", autoPaste) {
+            scope.launch { settings.setAutoPaste(it) }
+        }
+        SettingSwitch(Icons.Default.Download, "Автоскачивание",
+            if (audioOnly) "Недоступно в режиме «Только аудио»" else "Скачивать сразу после вставки",
+            autoDownload && !audioOnly, enabled = !audioOnly) {
+            scope.launch { settings.setAutoDownload(it) }
+        }
+        SettingSwitch(Icons.Default.MusicNote, "Только аудио",
+            "Скачивать только звук", audioOnly) { enabled ->
+            scope.launch {
+                settings.setAudioOnly(enabled)
+                if (enabled && autoDownload) settings.setAutoDownload(false)
             }
-        )
+        }
 
         Spacer(Modifier.height(16.dp))
-
         SectionHeader("Интерфейс")
 
-        SettingItem(
-            icon = Icons.Default.Palette,
-            title = "Тема",
-            subtitle = themeMode.label,
-            onClick = { showThemeDialog = true }
-        )
+        SettingItem(Icons.Default.Palette, "Тема", themeMode.label) { showThemeDialog = true }
 
-        SettingSwitch(
-            icon = Icons.Default.Badge,
-            title = "Счётчик очереди",
-            subtitle = "Показывать на «Главной»",
-            checked = badgeQueue,
-            onCheckedChange = { scope.launch { settings.setBadgeQueue(it) } }
-        )
-
-        SettingSwitch(
-            icon = Icons.Default.Badge,
-            title = "Счётчик всего",
-            subtitle = "Показывать на «Загрузках»",
-            checked = badgeTotal,
-            onCheckedChange = { scope.launch { settings.setBadgeTotal(it) } }
-        )
+        SettingSwitch(Icons.Default.Badge, "Счётчик очереди", "Показывать на «Главной»", badgeQueue) {
+            scope.launch { settings.setBadgeQueue(it) }
+        }
+        SettingSwitch(Icons.Default.Badge, "Счётчик всего", "Показывать на «Загрузках»", badgeTotal) {
+            scope.launch { settings.setBadgeTotal(it) }
+        }
 
         Spacer(Modifier.height(16.dp))
-
         SectionHeader("Статистика")
-
         val s = stats
-        StatItem(title = "Всего скачано", value = s?.total?.toString() ?: "…")
-        StatItem(title = "За последние 30 дней", value = s?.thisMonth?.toString() ?: "…")
-        StatItem(title = "Общий размер", value = s?.let { formatSize(it.totalSizeBytes) } ?: "…")
+        StatItem("Всего скачано", s?.total?.toString() ?: "…")
+        StatItem("За 30 дней", s?.thisMonth?.toString() ?: "…")
+        StatItem("Общий размер", s?.let { formatSize(it.totalSizeBytes) } ?: "…")
 
         Spacer(Modifier.height(16.dp))
-
         SectionHeader("Файлы")
 
-        SettingItem(
-            icon = Icons.Default.Folder,
-            title = "Папка сохранения",
-            subtitle = "DCIM/VideoDownloader",
-            onClick = onChooseFolder
-        )
+        SettingItem(Icons.Default.Folder, "Папка сохранения", "DCIM/VideoDownloader", onChooseFolder)
 
-        SettingItem(
-            icon = Icons.Default.Delete,
-            title = "Очистить очередь",
-            subtitle = "Отменить все активные загрузки",
-            onClick = {
-                WorkManager.getInstance(context).cancelAllWork()
-                Toast.makeText(context, "Очередь очищена", Toast.LENGTH_SHORT).show()
-            }
-        )
+        SettingItem(Icons.Default.Delete, "Очистить очередь", "Отменить все активные загрузки") {
+            WorkManager.getInstance(context).cancelAllWork()
+            Toast.makeText(context, "Очередь очищена", Toast.LENGTH_SHORT).show()
+        }
 
         Spacer(Modifier.height(16.dp))
-
         SectionHeader("Справка")
 
-        SettingItem(
-            icon = Icons.Default.Star,
-            title = "Почему наше лучше",
-            subtitle = "Преимущества приложения",
-            onClick = { showWhyBetter = true }
-        )
-
-        SettingItem(
-            icon = Icons.AutoMirrored.Filled.HelpOutline,
-            title = "Поддерживаемые сервисы",
-            subtitle = "Что работает сейчас, что в разработке",
-            onClick = { showSupportedHelp = true }
-        )
+        SettingItem(Icons.Default.Star, "Почему наше лучше", "Преимущества приложения") {
+            showWhyBetter = true
+        }
+        SettingItem(Icons.AutoMirrored.Filled.HelpOutline, "Поддерживаемые сервисы",
+            "Что работает сейчас, что в разработке") { showSupported = true }
 
         Spacer(Modifier.height(16.dp))
-
-        // ================= ОБРАТНАЯ СВЯЗЬ И ПОДДЕРЖКА =================
         SectionHeader("Обратная связь")
 
-        SettingItem(
-            icon = Icons.Default.Favorite,
-            title = "Поддержать разработчика",
-            subtitle = "Добровольный донат на DonationAlerts",
-            onClick = { openUrl(context, SUPPORT_URL) }
-        )
-
-        SettingItem(
-            icon = Icons.Default.Share,
-            title = "Поделиться приложением",
-            subtitle = "Отправить ссылку другу",
-            onClick = { shareApp(context) }
-        )
-
-        SettingItem(
-            icon = Icons.Default.Star,
-            title = "Оценить в RuStore",
-            subtitle = "Поставьте оценку — это помогает проекту",
-            onClick = { openUrl(context, RUSTORE_URL) }
-        )
-
-        SettingItem(
-            icon = Icons.AutoMirrored.Filled.Send,
-            title = "Telegram-канал",
-            subtitle = TELEGRAM_DISPLAY,
-            onClick = { openUrl(context, TELEGRAM_URL) }
-        )
-
-        SettingItem(
-            icon = Icons.Default.Email,
-            title = "Написать разработчику",
-            subtitle = SUPPORT_EMAIL,
-            onClick = { sendEmail(context) }
-        )
+        SettingItem(Icons.Default.Favorite, "Поддержать разработчика",
+            "Донат на DonationAlerts") {
+            openUrl(context, "https://www.donationalerts.com/r/lucifer_dennica")
+        }
+        SettingItem(Icons.Default.Share, "Поделиться приложением", "Отправить другу") {
+            shareApp(context)
+        }
+        SettingItem(Icons.Default.Star, "Оценить в RuStore", "Оставьте отзыв") {
+            openUrl(context, RUSTORE_URL)
+        }
+        SettingItem(Icons.Default.Email, "Написать разработчику", SUPPORT_EMAIL) {
+            sendEmail(context)
+        }
 
         Spacer(Modifier.height(16.dp))
-
         SectionHeader("О приложении")
 
-        SettingItem(
-            icon = Icons.Default.Info,
-            title = "Версия",
-            subtitle = BuildConfig.VERSION_NAME,
-            onClick = { }
-        )
-
-        SettingItem(
-            icon = Icons.Default.Refresh,
-            title = "Проверить обновления",
-            subtitle = if (isCheckingUpdate) "Проверяю…" else "Последняя версия с GitHub",
-            onClick = {
-                if (isCheckingUpdate) return@SettingItem
-                isCheckingUpdate = true
-                CoroutineScope(Dispatchers.IO).launch {
-                    val update = UpdateChecker.checkForUpdate()
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        isCheckingUpdate = false
-                        if (update != null) {
-                            UpdateChecker.showUpdateDialog(context, update)
-                        } else {
-                            Toast.makeText(context, "У вас последняя версия", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+        SettingItem(Icons.Default.Info, "Версия", BuildConfig.VERSION_NAME) { }
+        SettingItem(Icons.Default.Refresh, "Проверить обновления",
+            if (isCheckingUpdate) "Проверяю…" else "Последняя версия") {
+            if (isCheckingUpdate) return@SettingItem
+            isCheckingUpdate = true
+            CoroutineScope(Dispatchers.IO).launch {
+                val update = UpdateChecker.checkForUpdate()
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    isCheckingUpdate = false
+                    if (update != null) UpdateChecker.showUpdateDialog(context, update)
+                    else Toast.makeText(context, "У вас последняя версия", Toast.LENGTH_SHORT).show()
                 }
             }
-        )
+        }
 
         Spacer(Modifier.height(16.dp))
-
         SectionHeader("Правовая информация")
 
-        SettingItem(
-            icon = Icons.Default.Shield,
-            title = "Правила использования",
-            subtitle = "Скачивайте только свой контент",
-            onClick = { showRulesDialog = true }
-        )
-
-        SettingItem(
-            icon = Icons.Default.CheckCircle,
-            title = "Безопасность",
-            subtitle = "Никакие данные не передаются наружу",
-            onClick = { showSecurityDialog = true }
-        )
+        SettingItem(Icons.Default.Shield, "Правила использования", "Личное использование") { showRulesDialog = true }
+        SettingItem(Icons.Default.CheckCircle, "Безопасность", "Данные не передаются наружу") { showSecurityDialog = true }
 
         Spacer(Modifier.height(32.dp))
-
-        Text(
-            "VideoDownloader ${BuildConfig.VERSION_NAME}",
+        Text("VideoDownloader ${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
-// ================= КОНСТАНТЫ ССЫЛОК =================
-
-// Ссылка на страницу донатов DonationAlerts
-private const val SUPPORT_URL = "https://www.donationalerts.com/r/lucifer_dennica"
-
-// ⚠️ ЗАМЕНИТЬ после публикации в RuStore:
-// Вставь реальную ссылку вида: "https://www.rustore.ru/catalog/app/com.example.videodownloader"
-private const val RUSTORE_URL = "#"
-
-// Telegram
-private const val TELEGRAM_URL = "https://t.me/Lucifer_Denicca_22142"
-private const val TELEGRAM_DISPLAY = "@Lucifer_Denicca_22142"
-
-// Почта разработчика
+private const val RUSTORE_URL = "#"   // ⚠️ заменить после публикации
 private const val SUPPORT_EMAIL = "denis22142qwe@gmail.com"
 
-// ================= ХЕЛПЕРЫ =================
-
 private fun openUrl(context: android.content.Context, url: String) {
-    if (url == "#" || url.isBlank()) {
-        Toast.makeText(context, "Ссылка появится после публикации в RuStore", Toast.LENGTH_SHORT).show()
+    if (url == "#") {
+        Toast.makeText(context, "Ссылка появится позже", Toast.LENGTH_SHORT).show()
         return
     }
     try {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        Toast.makeText(context, "Не удалось открыть ссылку", Toast.LENGTH_SHORT).show()
-    }
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+            android.net.Uri.parse(url)).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    } catch (_: Exception) { }
 }
 
 private fun shareApp(context: android.content.Context) {
-    // Если ссылка на RuStore ещё не вставлена — делимся текстом без неё
-    val hasRuStore = RUSTORE_URL != "#" && RUSTORE_URL.isNotBlank()
-    val text = if (hasRuStore) {
-        "Скачивай видео из TikTok и Facebook без водяного знака: $RUSTORE_URL"
-    } else {
-        "VideoDownloader — скачивай видео из TikTok и Facebook без водяного знака"
-    }
-
+    val text = "VideoDownloader — скачивай видео из Rutube, TikTok, Facebook, Instagram, Pinterest без водяного знака!"
     try {
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "VideoDownloader")
-            putExtra(Intent.EXTRA_TEXT, text)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(Intent.createChooser(intent, "Поделиться"))
-    } catch (e: Exception) {
-        Toast.makeText(context, "Не удалось поделиться", Toast.LENGTH_SHORT).show()
-    }
+        context.startActivity(android.content.Intent.createChooser(
+            android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_TEXT, text)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }, "Поделиться"))
+    } catch (_: Exception) { }
 }
 
 private fun sendEmail(context: android.content.Context) {
     try {
-        val intent = Intent(Intent.ACTION_SENDTO).apply {
-            data = Uri.parse("mailto:$SUPPORT_EMAIL")
-            putExtra(Intent.EXTRA_SUBJECT, "VideoDownloader — обратная связь")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        Toast.makeText(context, "Нет почтового клиента. Напишите на $SUPPORT_EMAIL", Toast.LENGTH_LONG).show()
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_SENDTO,
+            android.net.Uri.parse("mailto:$SUPPORT_EMAIL")).apply {
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "VideoDownloader — обратная связь")
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    } catch (_: Exception) {
+        Toast.makeText(context, "Напишите на $SUPPORT_EMAIL", Toast.LENGTH_LONG).show()
     }
 }
 
-// ================= UI-КОМПОНЕНТЫ =================
-
 @Composable
 private fun SectionHeader(title: String) {
-    Text(
-        title.uppercase(),
+    Text(title.uppercase(),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)
-    )
+        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp))
 }
 
 @Composable
-private fun SettingItem(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
+private fun SettingItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = MaterialTheme.shapes.medium
     ) {
-        Row(
-            Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
-            )
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -511,11 +307,8 @@ private fun SettingItem(
 
 @Composable
 private fun SettingSwitch(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    enabled: Boolean = true,
+    icon: ImageVector, title: String, subtitle: String,
+    checked: Boolean, enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Surface(
@@ -523,37 +316,20 @@ private fun SettingSwitch(
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = MaterialTheme.shapes.medium
     ) {
-        Row(
-            Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null,
                 tint = if (enabled) MaterialTheme.colorScheme.primary
                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp)
-            )
+                modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
+                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
                     color = if (enabled) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Switch(
-                checked = checked,
-                enabled = enabled,
-                onCheckedChange = onCheckedChange
-            )
+            Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
         }
     }
 }
@@ -565,22 +341,12 @@ private fun StatItem(title: String, value: String) {
         color = MaterialTheme.colorScheme.surfaceVariant,
         shape = MaterialTheme.shapes.medium
     ) {
-        Row(
-            Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                value,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(title, style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -600,84 +366,66 @@ private fun formatSize(bytes: Long): String {
 
 @Composable
 private fun InfoScreen(title: String, content: String, onBack: () -> Unit) {
-    BackHandler(enabled = true) {
-        onBack()
-    }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Text("←", style = MaterialTheme.typography.titleLarge)
-            }
+    BackHandler(enabled = true) { onBack() }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Text("←", style = MaterialTheme.typography.titleLarge) }
             Spacer(Modifier.width(8.dp))
-            Text(
-                title,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
-            )
+            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(8.dp))
         Text(content, style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(16.dp))
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-            Text("Назад")
-        }
+        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Назад") }
     }
 }
 
-private val SUPPORTED_SERVICES = """
-✅ Работает стабильно:
+private val SUPPORTED = """
+✅ Работает сейчас:
 
 • TikTok — видео, фото-карусели, аудио
+• Rutube — видео
 • Facebook — видео
+• Instagram — публичные Reels
+• Pinterest — видео-пины
 
-⚠️ В разработке:
+🕐 Скоро добавим:
 
 • YouTube
-• Instagram
 • VK
 • Twitter / X
 • Reddit
-• Pinterest
-• Snapchat
 • SoundCloud
+• Snapchat
 
-Мы работаем над добавлением всех этих сервисов. Следите за обновлениями!
+И другие источники.
 """.trimIndent()
 
 private val WHY_BETTER = """
-VideoDownloader — не просто «скачать видео». Вот что делает его особенным:
+VideoDownloader — не просто «скачать видео».
 
 ✅ БЕЗ ВОДЯНОГО ЗНАКА
-TikTok встроенная кнопка «Скачать» ставит логотип и ник автора поверх видео. Мы скачиваем чистую версию — без меток, без логотипов.
+Встроенная кнопка в TikTok ставит логотип и ник автора. Мы скачиваем чистое видео.
 
-✅ ОБХОД ЗАПРЕТА НА СКАЧИВАНИЕ
-Если автор запретил скачивание — кнопка в TikTok исчезает. У нас ссылка работает всё равно: мы обращаемся к серверу напрямую, а не через интерфейс.
+✅ 5 СЕРВИСОВ В ОДНОМ
+TikTok, Rutube, Facebook, Instagram, Pinterest — всё в одном приложении.
 
 ✅ ФОТО-КАРУСЕЛИ
-TikTok не даёт скачать картинки из постов-каруселей. Мы сохраняем все фото (8, 10, сколько есть) в отдельную папку — по одной карточке на альбом.
+Сохраняем все фото из поста TikTok в отдельную папку.
 
 ✅ ТОЛЬКО АУДИО
-Хотите сохранить только музыку из видео TikTok? Включите режим «Только аудио» — получите mp3/m4a без видео.
+Режим «Только аудио» — mp3/m4a без видео.
 
 ✅ ПАКЕТНОЕ СКАЧИВАНИЕ
-Вставьте сразу 10 ссылок — по одной на строку. Все уйдут в очередь и скачаются параллельно.
+Вставьте 10 ссылок — все скачаются.
 
 ✅ ФОНОВАЯ ЗАГРУЗКА
-Можно свернуть приложение — загрузка продолжится. TikTok требует держать экран открытым.
+Сверните приложение — загрузка продолжится.
 
-✅ ОРГАНИЗАЦИЯ
-Файлы сохраняются по папкам: DCIM/VideoDownloader/TikTok/, /Facebook/. Никакой свалки в общем DCIM.
+✅ СОРТИРОВКА И ФИЛЬТРЫ
+Найдите нужное видео за секунду.
 
 ✅ БЕСПЛАТНО И БЕЗ РЕКЛАМЫ
-Никаких подписок, никаких всплывающих окон, никаких «премиум» функций.
+(реклама будет, но не навязчивая)
 """.trimIndent()
