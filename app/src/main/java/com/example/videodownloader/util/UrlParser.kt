@@ -6,19 +6,32 @@ data class ParsedUrl(
     val value: String,
     val host: String,
     val service: String,
-    val isDirectMedia: Boolean
+    val isDirectMedia: Boolean,
+    val supported: Boolean
 )
 
 object UrlParser {
 
-    /**
-     * Только те сервисы, которые реально работают на 1.7.4.
-     * Остальные (VK, Twitter, Reddit, Pinterest, Snapchat, SoundCloud,
-     * YouTube, Instagram) временно убраны — работаем над ними.
-     */
-    private val knownHosts = listOf(
-        "tiktok.com", "vt.tiktok.com", "vm.tiktok.com",
-        "facebook.com", "fb.watch", "m.facebook.com"
+    /** Рабочие сервисы через FastSaver. */
+    private val fastSaverHosts = listOf(
+        "rutube.ru",
+        "facebook.com", "fb.watch", "m.facebook.com",
+        "instagram.com",
+        "pinterest.com", "pin.it"
+    )
+
+    /** TikTok идёт напрямую через tikwm. */
+    private val tiktokHosts = listOf(
+        "tiktok.com", "vt.tiktok.com", "vm.tiktok.com"
+    )
+
+    /** Скоро добавим. */
+    private val comingSoonHosts = listOf(
+        "youtube.com", "youtu.be", "m.youtube.com",
+        "vk.com", "m.vk.com", "vkvideo.ru",
+        "twitter.com", "x.com",
+        "reddit.com", "redd.it",
+        "soundcloud.com", "snapchat.com"
     )
 
     fun parse(raw: String): ParsedUrl? {
@@ -29,13 +42,19 @@ object UrlParser {
         val host = uri.host?.lowercase() ?: return null
         if (uri.scheme !in listOf("http", "https")) return null
 
-        val isDirectMedia = isDirectMediaPath(uri.path)
-        val knownHost = knownHosts.any { host == it || host.endsWith(".$it") }
+        val isDirect = isDirectMediaPath(uri.path)
 
-        if (!isDirectMedia && !knownHost) return null
+        // Проверка по всем спискам
+        val matchFastSaver = fastSaverHosts.any { host == it || host.endsWith(".$it") }
+        val matchTikTok = tiktokHosts.any { host == it || host.endsWith(".$it") }
+        val matchSoon = comingSoonHosts.any { host == it || host.endsWith(".$it") }
 
-        val service = detectService(host)
-        return ParsedUrl(value, host, service, isDirectMedia)
+        if (!isDirect && !matchFastSaver && !matchTikTok && !matchSoon) return null
+
+        val service = detectService(host, matchFastSaver, matchTikTok, matchSoon)
+        val supported = isDirect || matchFastSaver || matchTikTok
+
+        return ParsedUrl(value, host, service, isDirect, supported)
     }
 
     fun parseAll(text: String): List<ParsedUrl> {
@@ -54,9 +73,22 @@ object UrlParser {
                p.endsWith(".mov") || p.endsWith(".m4v")
     }
 
-    private fun detectService(host: String): String = when {
-        host.contains("tiktok") -> "TikTok"
+    private fun detectService(
+        host: String,
+        fastSaver: Boolean,
+        tiktok: Boolean,
+        soon: Boolean
+    ): String = when {
+        tiktok -> "TikTok"
+        host.contains("rutube") -> "Rutube"
         host.contains("facebook") || host == "fb.watch" -> "Facebook"
+        host.contains("instagram") -> "Instagram"
+        host.contains("pinterest") || host == "pin.it" -> "Pinterest"
+        host.contains("youtube") || host == "youtu.be" -> "YouTube"
+        host.contains("vk.com") || host.contains("vkvideo") -> "VK"
+        host.contains("twitter") || host == "x.com" -> "Twitter"
+        host.contains("reddit") || host == "redd.it" -> "Reddit"
+        host.contains("soundcloud") -> "SoundCloud"
         else -> host
     }
 }
