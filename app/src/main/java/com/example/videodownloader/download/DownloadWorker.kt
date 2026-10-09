@@ -330,13 +330,19 @@ class DownloadWorker(
         val conn = (URL("$SERVER_BASE/api/download").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
-            readTimeout = 300_000  // 5 минут — ffmpeg может долго обрабатывать
+            readTimeout = 300_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("User-Agent", USER_AGENT)
         }
         try {
             conn.outputStream.use { it.write(body.toByteArray()) }
+
+            // Показываем "Обработка на сервере…" пока не начали получать данные
+            repository.getById(id)?.let {
+                repository.update(it.copy(progress = 5, error = "Обработка на сервере…"))
+            }
+            showNotification(id, "Обработка на сервере…", 0, ongoing = true)
 
             val code = conn.responseCode
             if (code !in 200..299) {
@@ -345,31 +351,37 @@ class DownloadWorker(
             }
 
             val contentType = conn.contentType?.substringBefore(";")?.trim()
-            Log.d(TAG, "downloadFromServer: type=$contentType, size=${conn.contentLengthLong}")
-
             val total = conn.contentLengthLong
+            Log.d(TAG, "downloadFromServer: type=$contentType, size=$total")
+
             var done = 0L
             var lastNotified = 0
+            var firstByteReceived = false
+
             conn.inputStream.use { input ->
                 outFile.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     var read: Int
                     while (input.read(buffer).also { read = it } != -1) {
+                        if (!firstByteReceived) {
+                            firstByteReceived = true
+                            // Сбрасываем "Обработка…" и показываем прогресс
+                            repository.getById(id)?.let { repository.update(it.copy(error = null)) }
+                        }
                         output.write(buffer, 0, read)
                         done += read
-                        if (total > 0) {
-                            val percent = 5 + ((done * 90) / total).toInt()
-                            repository.getById(id)?.let { repository.update(it.copy(progress = percent)) }
-                            if (percent - lastNotified >= 10) {
-                                lastNotified = percent
-                                showNotification(id, "Скачивание… $percent%", percent, ongoing = true)
-                            }
+
+                        val percent = if (total > 0) {
+                            5 + ((done * 90) / total).toInt()
                         } else {
-                            // Неизвестный размер — показываем прогресс по факту
-                            val kb = done / 1024
-                            if (kb % 500 == 0L) {
-                                showNotification(id, "Скачано ${kb} КБ", 50, ongoing = true)
-                            }
+                            // Неизвестный размер — прогресс по байтам (примерно)
+                            minOf(90, 10 + (done / 1024 / 100).toInt())
+                        }
+
+                        if (percent - lastNotified >= 5) {
+                            lastNotified = percent
+                            repository.getById(id)?.let { repository.update(it.copy(progress = percent)) }
+                            showNotification(id, "Скачивание… $percent%", percent, ongoing = true)
                         }
                     }
                 }
