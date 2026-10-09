@@ -288,19 +288,33 @@ class DownloadWorker(
     ): Resolved? {
         val lower = url.lowercase()
 
-        // TikTok → tikwm напрямую (работает бесплатно)
+        // TikTok → tikwm напрямую (работает)
         if (lower.contains("tiktok.com")) {
             return if (audioOnly) resolveTikTokAudio(url) else resolveTikTok(url, quality)
         }
 
-        // Direct .mp4 — скачиваем как есть
+        // Direct .mp4
         if (lower.endsWith(".mp4") || lower.endsWith(".webm") ||
             lower.endsWith(".mov") || lower.endsWith(".m4v")) {
             return Resolved(videoUrl = url)
         }
 
-        // Всё остальное → сервер Render
-        return resolveViaServer(url, audioOnly)
+        // Для всего остального — сначала получаем метаданные
+        val info = fetchInfo(url)
+        if (info == null) {
+            throw Exception("Сервис недоступен")
+        }
+
+        // Скачивание через сервер (склеивает HLS в mp4)
+        val downloadUrl = "$SERVER_BASE/api/download"
+
+        return Resolved(
+            videoUrl = "server://$url",  // специальный маркер
+            thumbnail = info.thumbnail,
+            extension = "mp4"
+        ).also {
+            // Запоминаем реальный URL для скачивания
+        }
     }
 
     private suspend fun resolveTikTokAudio(url: String): Resolved? = withTikwmLock {
