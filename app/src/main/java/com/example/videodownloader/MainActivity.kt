@@ -39,7 +39,6 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private val TAG = "MainActivity"
-
     private val sharedLinkState = mutableStateOf("")
 
     private val folderPicker = registerForActivityResult(
@@ -57,25 +56,13 @@ class MainActivity : ComponentActivity() {
 
     private val notifPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        Log.d(TAG, "Уведомления: granted=$granted")
-        requestMediaPermissions()
-    }
+    ) { requestMediaPermissions() }
 
     private val mediaPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        result.forEach { (perm, granted) ->
-            Log.d(TAG, "Медиа $perm: granted=$granted")
-        }
         val allGranted = result.values.all { it }
         needsMediaPermission.value = !allGranted
-
-        if (!allGranted) {
-            if (!shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_VIDEO)) {
-                needsMediaPermission.value = true
-            }
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,9 +79,7 @@ class MainActivity : ComponentActivity() {
         CoroutineScope(Dispatchers.IO).launch {
             val update = UpdateChecker.checkForUpdate()
             if (update != null) {
-                runOnUiThread {
-                    UpdateChecker.showUpdateDialog(this@MainActivity, update)
-                }
+                runOnUiThread { UpdateChecker.showUpdateDialog(this@MainActivity, update) }
             }
         }
 
@@ -107,32 +92,22 @@ class MainActivity : ComponentActivity() {
                     AlertDialog(
                         onDismissRequest = { needsMediaPermission.value = false },
                         title = { Text("Нужно разрешение") },
-                        text = {
-                            Text(
-                                "Чтобы приложение видело скачанные видео и фото, " +
-                                "разрешите доступ к файлам в настройках."
-                            )
-                        },
+                        text = { Text("Разрешите доступ к файлам в настройках.") },
                         confirmButton = {
                             TextButton(onClick = {
                                 needsMediaPermission.value = false
-                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                     data = Uri.fromParts("package", packageName, null)
-                                }
-                                startActivity(intent)
+                                })
                             }) { Text("Открыть настройки") }
                         },
                         dismissButton = {
-                            TextButton(onClick = { needsMediaPermission.value = false }) {
-                                Text("Позже")
-                            }
+                            TextButton(onClick = { needsMediaPermission.value = false }) { Text("Позже") }
                         }
                     )
                 }
 
-                val sharedLink = sharedLinkState.value
-
-                VideoDownloaderRoot(sharedLink, { folderPicker.launch(null) })
+                VideoDownloaderRoot(sharedLinkState.value, { folderPicker.launch(null) })
             }
         }
     }
@@ -147,10 +122,7 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
         if (intent.action == Intent.ACTION_SEND) {
             val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty().trim()
-            if (text.isNotBlank()) {
-                sharedLinkState.value = text
-                Log.d(TAG, "Share intent: $text")
-            }
+            if (text.isNotBlank()) sharedLinkState.value = text
         }
     }
 
@@ -173,12 +145,9 @@ class MainActivity : ComponentActivity() {
         }
 
         if (notGranted.isEmpty()) {
-            Log.d(TAG, "Все разрешения уже выданы")
             needsMediaPermission.value = false
             return
         }
-
-        Log.d(TAG, "Запрашиваем разрешения: ${notGranted.toList()}")
         mediaPermissions.launch(notGranted.toTypedArray())
     }
 }
@@ -205,6 +174,7 @@ private fun VideoDownloaderRoot(
 
     val active by vm.activeItems.collectAsState()
     val completed by vm.completedItems.collectAsState()
+    val preview by vm.preview.collectAsState()
 
     val badgeQueue by settings.badgeQueue.collectAsState(initial = false)
     val badgeTotal by settings.badgeTotal.collectAsState(initial = false)
@@ -223,21 +193,12 @@ private fun VideoDownloaderRoot(
                         i == 1 && badgeTotal -> completed.size
                         else -> null
                     }
-
                     NavigationBarItem(
                         selected = pagerState.currentPage == i,
-                        onClick = {
-                            scope.launch { pagerState.animateScrollToPage(i) }
-                        },
+                        onClick = { scope.launch { pagerState.animateScrollToPage(i) } },
                         icon = {
                             if (badgeCount != null) {
-                                BadgedBox(
-                                    badge = {
-                                        Badge {
-                                            Text(badgeCount.toString())
-                                        }
-                                    }
-                                ) {
+                                BadgedBox(badge = { Badge { Text(badgeCount.toString()) } }) {
                                     Icon(tab.icon, contentDescription = tab.label)
                                 }
                             } else {
@@ -259,6 +220,9 @@ private fun VideoDownloaderRoot(
                 0 -> HomeScreen(
                     initialLink = sharedLink,
                     activeItems = active,
+                    preview = preview,
+                    onPreviewRequest = vm::fetchPreview,
+                    onPreviewClear = vm::clearPreview,
                     onDownloadVideo = { vm.enqueue(it, audio = false) },
                     onDownloadAudio = { vm.enqueue(it, audio = true) },
                     onDownloadMany = { vm.enqueueMany(it, audio = false) },
