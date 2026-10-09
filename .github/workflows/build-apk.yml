@@ -3,9 +3,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   release:
     types: [published]
 
@@ -16,7 +14,6 @@ jobs:
   build:
     name: Build signed release APK
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
@@ -56,11 +53,10 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "❌ ERROR: KEYSTORE_BASE64 secret is empty or not set"
+            echo "❌ KEYSTORE_BASE64 secret is empty"
             exit 1
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > app/release.jks
-          echo "✅ Keystore decoded:"
           ls -la app/release.jks
 
       - name: Build release APK
@@ -74,32 +70,32 @@ jobs:
       - name: Verify signing
         run: |
           APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-          echo "APK: $APK_PATH"
           $ANDROID_HOME/build-tools/35.0.0/apksigner verify --print-certs "$APK_PATH" || true
 
       - name: Rename APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.7.5.apk
+          cp app/build/outputs/apk/release/app-release.apk release/VideoDownloader-v1.7.6.apk
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-v1.7.5
-          path: release/VideoDownloader-v1.7.5.apk
+          name: VideoDownloader-v1.7.6
+          path: release/VideoDownloader-v1.7.6.apk
           if-no-files-found: error
 
       - name: Attach APK to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/VideoDownloader-v1.7.5.apk
+          files: release/VideoDownloader-v1.7.6.apk
           tag_name: ${{ github.event.release.tag_name }}
           name: Release ${{ github.event.release.tag_name }}
           body: |
             ## VideoDownloader ${{ github.event.release.tag_name }}
-            - Кнопка «Поддержать разработчика» (DonationAlerts)
-            - Поделиться приложением / Оценить в RuStore
-            - Контакты разработчика: Telegram, email
+            - 5 сервисов: TikTok, Rutube, Facebook, Instagram, Pinterest
+            - Превью перед скачиванием
+            - Сортировка и фильтр в галерее
+            - Сервер FastSaver
           draft: false
           prerelease: false
